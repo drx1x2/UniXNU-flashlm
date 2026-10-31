@@ -1,0 +1,13 @@
+# 复制成 local.toml（已被 .gitignore 忽略）可把整个类别指向本地目录；每个子目录是一个模块。
+# 命令行参数（--local、--local-drivers、…）优先于这个文件。
+[local]
+# drivers = "~/src/drivers"
+# kits    = "~/src/kits"
+
+# 构建输入（IPSW、UEFI 树、DTB 等）不写在这里：那是 UniXNU 检出目录里的 unixnu.local.toml，
+# 字段说明见 https://unixnu.com/reference/configuration#local-build-inputs 。
+# 本项目实际用到的输入：
+#   device   = "../UniXNU-flashlm"
+#   uefi     = "../../ref/aloha-flashlm"
+#   dtb      = "<uefi-checkout/DeviceTreeBlob/Android/android-flashlm.dtb>"
+#   ipsw     = "~/work1/ipsw/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw"

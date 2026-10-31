@@ -1,0 +1,1143 @@
+diff --git a/feeds.toml b/feeds.toml
+index 259bb88..5f3682c 100644
+--- a/feeds.toml
++++ b/feeds.toml
+@@ -7,11 +7,11 @@
+ name = "xnu"
+ kind = "refer"
+ git = "https://github.com/apple-oss-distributions/xnu.git"
+-ref = "xnu-10063.141.1"
+-commit = "d8b80295118ef25ac3a784134bcf95cd8e88109f"
++ref = "xnu-8796.141.3"
++commit = "1b191cb58250d0705d8a51287127505aa4bc0789"
+ # Everything that depends on the Darwin version is set here and passed to the kernel scripts.
+-darwin = "23.6.0"
+-version = "10063.141.1"
++darwin = "22.6.0"
++version = "8796.141.3"
+ driverkit_tag = "xnu-10063.121.3"    # earlier tag that still has iokit/DriverKit headers
+ trustcache_tag = "xnu-8796.101.5"    # earlier tag that still has EXTERNAL_HEADERS/TrustCache
+ 
+diff --git a/patches/libpthread/zz-8796-no-jit-entitled.patch b/patches/libpthread/zz-8796-no-jit-entitled.patch
+new file mode 100644
+index 0000000..6469bda
+--- /dev/null
++++ b/patches/libpthread/zz-8796-no-jit-entitled.patch
+@@ -0,0 +1,16 @@
++diff --git a/kern/kern_support.c b/kern/kern_support.c
++index bdb04ab..a061c08 100644
++--- a/kern/kern_support.c
+++++ b/kern/kern_support.c
++@@ -667,10 +667,7 @@ _bsdthread_register(struct proc *p,
++ 	*retval = PTHREAD_FEATURE_SUPPORTED;
++ 
++ #if _PTHREAD_CONFIG_JIT_WRITE_PROTECT
++-	if (pthread_kern->proc_get_jit_entitled(p)) {
++-		*retval |= PTHREAD_FEATURE_JIT_ENTITLED;
++-	}
++-
+++	/* xnu-8796's pthread_callbacks_s has no proc_get_jit_entitled; do not report JIT entitlement. */
++ 	bool late = false;
++ 	if (pthread_kern->proc_get_pthread_jit_allowlist2(p, &late)) {
++ 		*retval |= PTHREAD_FEATURE_JIT_ALLOWLIST;
+diff --git a/patches/xnu/external-archive-dependencies.patch b/patches/xnu-10063-only/external-archive-dependencies.patch
+similarity index 100%
+rename from patches/xnu/external-archive-dependencies.patch
+rename to patches/xnu-10063-only/external-archive-dependencies.patch
+diff --git a/patches/xnu/native-aes-personality.patch b/patches/xnu-10063-only/native-aes-personality.patch
+similarity index 100%
+rename from patches/xnu/native-aes-personality.patch
+rename to patches/xnu-10063-only/native-aes-personality.patch
+diff --git a/patches/xnu/offline-owner-systemos-mount.patch b/patches/xnu-10063-only/offline-owner-systemos-mount.patch
+similarity index 100%
+rename from patches/xnu/offline-owner-systemos-mount.patch
+rename to patches/xnu-10063-only/offline-owner-systemos-mount.patch
+diff --git a/patches/xnu/pgz-aligned-validation.patch b/patches/xnu-10063-only/pgz-aligned-validation.patch
+similarity index 100%
+rename from patches/xnu/pgz-aligned-validation.patch
+rename to patches/xnu-10063-only/pgz-aligned-validation.patch
+diff --git a/patches/xnu/public-entitlements-header.patch b/patches/xnu-10063-only/public-entitlements-header.patch
+similarity index 100%
+rename from patches/xnu/public-entitlements-header.patch
+rename to patches/xnu-10063-only/public-entitlements-header.patch
+diff --git a/patches/xnu/published-freezer-condition.patch b/patches/xnu-10063-only/published-freezer-condition.patch
+similarity index 100%
+rename from patches/xnu/published-freezer-condition.patch
+rename to patches/xnu-10063-only/published-freezer-condition.patch
+diff --git a/patches/xnu/zzy-native-gpu-addon-mount.patch b/patches/xnu-10063-only/zzy-native-gpu-addon-mount.patch
+similarity index 100%
+rename from patches/xnu/zzy-native-gpu-addon-mount.patch
+rename to patches/xnu-10063-only/zzy-native-gpu-addon-mount.patch
+diff --git a/patches/xnu/zzy-staged-system-apps.patch b/patches/xnu-10063-only/zzy-staged-system-apps.patch
+similarity index 100%
+rename from patches/xnu/zzy-staged-system-apps.patch
+rename to patches/xnu-10063-only/zzy-staged-system-apps.patch
+diff --git a/patches/xnu/zzyb-native-cryptex-os-view.patch b/patches/xnu-10063-only/zzyb-native-cryptex-os-view.patch
+similarity index 100%
+rename from patches/xnu/zzyb-native-cryptex-os-view.patch
+rename to patches/xnu-10063-only/zzyb-native-cryptex-os-view.patch
+diff --git a/patches/xnu/zzz-boot-progress.patch b/patches/xnu-10063-only/zzz-boot-progress.patch
+similarity index 100%
+rename from patches/xnu/zzz-boot-progress.patch
+rename to patches/xnu-10063-only/zzz-boot-progress.patch
+diff --git a/patches/xnu/apple-only-cpu-tunables.patch b/patches/xnu/apple-only-cpu-tunables.patch
+index 9470a24..c1814d9 100644
+--- a/patches/xnu/apple-only-cpu-tunables.patch
++++ b/patches/xnu/apple-only-cpu-tunables.patch
+@@ -1,22 +1,21 @@
+ diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+-index d4909c7..0c01b79 100644
++index e5336e5..7193105 100644
+ --- a/osfmk/arm64/start.s
+ +++ b/osfmk/arm64/start.s
+ @@ -33,7 +33,9 @@
+- #include <pexpert/arm64/board_config.h>
+  #include <mach_assert.h>
+  #include <machine/asm.h>
++ #include "assym.s"
+ +#if defined(APPLE_ARM64_ARCH_FAMILY)
+  #include <arm64/tunables/tunables.s>
+ +#endif
+  #include <arm64/exception_asm.h>
+  
+  #if __ARM_KERNEL_PROTECT__
+-@@ -783,10 +785,13 @@ common_start:
++@@ -774,10 +776,12 @@ common_start:
+  	// Initialization common to all non-virtual Apple targets
+  #endif  // APPLE_ARM64_ARCH_FAMILY
+  
+-+
+ +#if defined(APPLE_ARM64_ARCH_FAMILY)
+  	// Read MIDR before start of per-SoC tunables
+  	mrs x12, MIDR_EL1
+@@ -24,5 +23,5 @@ index d4909c7..0c01b79 100644
+  	APPLY_TUNABLES x12, x13, x14
+ +#endif
+  
+- #if HAS_CLUSTER && !NO_CPU_OVRD
+- 	// Unmask external IRQs if we're restarting from non-retention WFI
++ 
++ #if HAS_CLUSTER
+diff --git a/patches/xnu/source-machine-layer.patch b/patches/xnu/source-machine-layer.patch
+index 8c419b5..f6f2d76 100644
+--- a/patches/xnu/source-machine-layer.patch
++++ b/patches/xnu/source-machine-layer.patch
+@@ -1,8 +1,8 @@
+ diff --git a/config/MASTER b/config/MASTER
+-index cbe6e15..abf9fe9 100644
++index 07147cb..214e26b 100644
+ --- a/config/MASTER
+ +++ b/config/MASTER
+-@@ -332,6 +332,8 @@ options		CONFIG_EXCLAVES			# <config_exclaves>
++@@ -321,6 +321,8 @@ options   CONFIG_EMBEDDED			# <config_embedded>
+  # Compile XNU with PPL support.
+  options   CONFIG_PMAP_PPL			# <config_pmap_ppl>
+  
+@@ -12,7 +12,7 @@ index cbe6e15..abf9fe9 100644
+  options   NOS_ARM_PMAP			# <nos_arm_pmap>
+  
+ diff --git a/config/MASTER.arm64.bcm2837 b/config/MASTER.arm64.bcm2837
+-index 77b9dfe..a185cf4 100644
++index 1ed75ee..583f0fe 100644
+ --- a/config/MASTER.arm64.bcm2837
+ +++ b/config/MASTER.arm64.bcm2837
+ @@ -16,7 +16,7 @@
+@@ -22,11 +22,11 @@ index 77b9dfe..a185cf4 100644
+ -#  KERNEL_BASE =    [ arm64 config_pmap_ppl xsmall msgb_small config_embedded config_requires_u32_munging ARM_EXTRAS_BASE ]
+ +#  KERNEL_BASE =    [ arm64 config_pmap_ppl nos_arm_asm nos_arm_pmap xsmall msgb_small config_embedded config_requires_u32_munging ARM_EXTRAS_BASE ]
+  #  KERNEL_RELEASE = [ KERNEL_BASE ]
+- #  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_ext_paniclog ]
+- #  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_ext_paniclog ]
++ #  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug ]
++ #  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug ]
+ @@ -50,8 +50,8 @@
+  #  LIBKERN_DEBUG =  [ LIBKERN_BASE iotracking ]
+- #  PERF_DBG_BASE =  [ mach_kdp config_serial_kdp kperf ]
++ #  PERF_DBG_BASE =  [ mach_kdp config_serial_kdp kperf kpc ]
+  #  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
+ -#  PERF_DBG_DEV =   [ PERF_DBG_BASE config_dtrace zleaks kdp_interactive_debugging alternate_debugger sched_hygiene_debug config_iotrace]
+ -#  PERF_DBG_DEBUG = [ PERF_DBG_BASE config_dtrace zleaks kdp_interactive_debugging alternate_debugger sched_hygiene_debug config_iotrace]
+@@ -35,21 +35,182 @@ index 77b9dfe..a185cf4 100644
+  #  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_library_validation config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_service_port_info ]
+  #  MACH_RELEASE =   [ MACH_BASE config_skip_precise_user_kernel_time debugger_for_zone_info ]
+  #  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace ]
++diff --git a/osfmk/arm64/kpc.c b/osfmk/arm64/kpc.c
++new file mode 100644
++index 0000000..e474665
++--- /dev/null
+++++ b/osfmk/arm64/kpc.c
++@@ -0,0 +1,159 @@
+++/*
+++ * cepheus: arm64 kpc backend. Apple's osfmk/arm64/kpc.c programs the Apple
+++ * PMU (implementation-defined system registers) and ships only in the KDK's
+++ * closed per-SoC library. xnu does not build without kperf, and kperf needs
+++ * kpc, so this backend reports no counters at all: every class is empty and
+++ * every configuration request fails cleanly.
+++ */
+++
+++#include <mach/mach_types.h>
+++#include <machine/machine_routines.h>
+++#include <kern/processor.h>
+++#include <sys/errno.h>
+++#include <kern/kpc.h>
+++
+++int kpc_pc_capture = 0;
+++
+++void
+++kpc_arch_init(void)
+++{
+++}
+++
+++uint32_t
+++kpc_get_classes(void)
+++{
+++	return 0;
+++}
+++
+++int
+++kpc_get_pmu_version(void)
+++{
+++	return KPC_PMU_ERROR;
+++}
+++
+++uint32_t
+++kpc_fixed_count(void)
+++{
+++	return 0;
+++}
+++
+++uint32_t
+++kpc_fixed_config_count(void)
+++{
+++	return 0;
+++}
+++
+++uint64_t
+++kpc_fixed_max(void)
+++{
+++	return 0;
+++}
+++
+++uint32_t
+++kpc_configurable_count(void)
+++{
+++	return 0;
+++}
+++
+++uint32_t
+++kpc_configurable_config_count(uint64_t pmc_mask __unused)
+++{
+++	return 0;
+++}
+++
+++uint64_t
+++kpc_configurable_max(void)
+++{
+++	return 0;
+++}
+++
+++uint32_t
+++kpc_rawpmu_config_count(void)
+++{
+++	return 0;
+++}
+++
+++int
+++kpc_get_rawpmu_config(kpc_config_t *configv __unused)
+++{
+++	return 0;
+++}
+++
+++boolean_t
+++kpc_is_running_fixed(void)
+++{
+++	return FALSE;
+++}
+++
+++boolean_t
+++kpc_is_running_configurable(uint64_t pmc_mask __unused)
+++{
+++	return FALSE;
+++}
+++
+++int
+++kpc_get_fixed_config(kpc_config_t *configv __unused)
+++{
+++	return 0;
+++}
+++
+++int
+++kpc_get_fixed_counters(uint64_t *counterv __unused)
+++{
+++	return 0;
+++}
+++
+++int
+++kpc_get_configurable_config(kpc_config_t *configv __unused, uint64_t pmc_mask __unused)
+++{
+++	return 0;
+++}
+++
+++int
+++kpc_get_configurable_counters(uint64_t *counterv __unused, uint64_t pmc_mask __unused)
+++{
+++	return 0;
+++}
+++
+++int
+++kpc_get_all_cpus_counters(uint32_t classes __unused, int *curcpu, uint64_t *buf __unused)
+++{
+++	if (curcpu) {
+++		*curcpu = cpu_number();
+++	}
+++	return 0;
+++}
+++
+++int
+++kpc_set_config_arch(struct kpc_config_remote *mp_config __unused)
+++{
+++	return ENOTSUP;
+++}
+++
+++int
+++kpc_set_period_arch(struct kpc_config_remote *mp_config __unused)
+++{
+++	return ENOTSUP;
+++}
+++
+++int
+++kpc_set_running_arch(struct kpc_running_remote *mp_config __unused)
+++{
+++	return ENOTSUP;
+++}
+++
+++int
+++kpc_set_sw_inc(uint32_t mask __unused)
+++{
+++	return ENOTSUP;
+++}
+++
+++void
+++kpc_idle(void)
+++{
+++}
+++
+++void
+++kpc_idle_exit(void)
+++{
+++}
+ diff --git a/osfmk/conf/files.arm64 b/osfmk/conf/files.arm64
+-index 528625b..0ee31c6 100644
++index c40d57b..ccccb50 100644
+ --- a/osfmk/conf/files.arm64
+ +++ b/osfmk/conf/files.arm64
+-@@ -34,10 +34,10 @@ osfmk/arm64/WKdmCompress_4k.s	standard
++@@ -25,8 +25,8 @@ osfmk/arm64/WKdmCompress_4k.s	standard
+  osfmk/arm64/WKdmData.s		standard
+  osfmk/arm64/lz4_decode_arm64.s  standard
+  osfmk/arm64/lz4_encode_arm64.s  standard
+ -osfmk/arm64/amcc_rorgn_ppl.c optional nos_arm_asm config_pmap_ppl
+--osfmk/arm64/amcc_rorgn_ppl_amcc.c optional nos_arm_asm config_pmap_ppl
+--osfmk/arm64/amcc_rorgn_ppl_ctrr3.c optional nos_arm_asm config_pmap_ppl
+ -osfmk/arm64/amcc_rorgn_common.c optional nos_arm_asm
+ +osfmk/arm64/amcc_rorgn_ppl.c optional nos_arm_asm config_pmap_ppl apple_amcc
+-+osfmk/arm64/amcc_rorgn_ppl_amcc.c optional nos_arm_asm config_pmap_ppl apple_amcc
+-+osfmk/arm64/amcc_rorgn_ppl_ctrr3.c optional nos_arm_asm config_pmap_ppl apple_amcc
+ +osfmk/arm64/amcc_rorgn_common.c optional nos_arm_asm apple_amcc
+  osfmk/arm64/bcopy.s standard
+  osfmk/arm64/bzero.s standard
+diff --git a/patches/xnu/uio-stackbuf-new-clang.patch b/patches/xnu/uio-stackbuf-new-clang.patch
+new file mode 100644
+index 0000000..63a36b3
+--- /dev/null
++++ b/patches/xnu/uio-stackbuf-new-clang.patch
+@@ -0,0 +1,342 @@
++diff --git a/bsd/kern/decmpfs.c b/bsd/kern/decmpfs.c
++index 95192dd..ff8c5e3 100644
++--- a/bsd/kern/decmpfs.c
+++++ b/bsd/kern/decmpfs.c
++@@ -515,7 +515,7 @@ decmpfs_fetch_compressed_header(vnode_t vp, decmpfs_cnode *cp, decmpfs_header **
++ 	const bool no_additional_data = ((cp != NULL)
++ 	    && (cp->cmp_type != 0)
++ 	    && (cp->cmp_minimal_xattr != 0));
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	decmpfs_header *hdr = NULL;
++ 
++ 	/*
++diff --git a/bsd/kern/kpi_socket.c b/bsd/kern/kpi_socket.c
++index 003cfb0..735eaf3 100644
++--- a/bsd/kern/kpi_socket.c
+++++ b/bsd/kern/kpi_socket.c
++@@ -727,7 +727,7 @@ sock_receive_internal(socket_t sock, struct msghdr *msg, mbuf_t *data,
++ 	int error = 0;
++ 	user_ssize_t length = 0;
++ 	struct sockaddr *fromsa = NULL;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF((msg != NULL) ? msg->msg_iovlen : 0)];
+++	UIO_STACKBUF(uio_buf, (msg != NULL) ? msg->msg_iovlen : 0);
++ 
++ 	if (sock == NULL) {
++ 		return EINVAL;
++diff --git a/bsd/kern/sys_generic.c b/bsd/kern/sys_generic.c
++index 9de68e1..66a3528 100644
++--- a/bsd/kern/sys_generic.c
+++++ b/bsd/kern/sys_generic.c
++@@ -303,7 +303,7 @@ dofileread(vfs_context_t ctx, struct fileproc *fp,
++     user_addr_t bufp, user_size_t nbyte, off_t offset, int flags,
++     user_ssize_t *retval)
++ {
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	uio_t uio;
++ 	int spacetype;
++ 
++@@ -350,7 +350,7 @@ static int
++ read_internal(struct proc *p, int fd, user_addr_t buf, user_size_t nbyte,
++     off_t offset, int flags, user_ssize_t *retval)
++ {
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	uio_t uio;
++ 	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
++ 
++@@ -631,7 +631,7 @@ dofilewrite(vfs_context_t ctx, struct fileproc *fp,
++     user_addr_t bufp, user_size_t nbyte, off_t offset, int flags,
++     user_ssize_t *retval)
++ {
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	uio_t uio;
++ 	int spacetype;
++ 
++@@ -678,7 +678,7 @@ int
++ write_internal(struct proc *p, int fd, user_addr_t buf, user_size_t nbyte,
++     off_t offset, int flags, guardid_t *puguard, user_ssize_t *retval)
++ {
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	uio_t uio;
++ 	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
++ 
++diff --git a/bsd/kern/uipc_syscalls.c b/bsd/kern/uipc_syscalls.c
++index f2bd38e..50625c0 100644
++--- a/bsd/kern/uipc_syscalls.c
+++++ b/bsd/kern/uipc_syscalls.c
++@@ -3561,7 +3561,7 @@ sendfile(proc_ref_t p, struct sendfile_args *uap, __unused int *retval)
++ 		mbuf_t  m;
++ 		unsigned int    nbufs = SFUIOBUFS, i;
++ 		uio_t   auio;
++-		uio_stackbuf_t    uio_buf[UIO_SIZEOF(SFUIOBUFS)]; /* 1 KB !!! */
+++		UIO_STACKBUF(uio_buf, SFUIOBUFS); /* 1 KB !!! */
++ 		size_t  uiolen;
++ 		user_ssize_t    rlen;
++ 		off_t   pgoff;
++diff --git a/bsd/sys/uio_internal.h b/bsd/sys/uio_internal.h
++index 74a2036..63e9f27 100644
++--- a/bsd/sys/uio_internal.h
+++++ b/bsd/sys/uio_internal.h
++@@ -172,6 +172,14 @@ __END_DECLS
++ 
++ typedef char __attribute__((aligned(_Alignof(union iovecs)))) uio_stackbuf_t;
++ 
+++/*
+++ * UIO_STACKBUF - declare a correctly sized and aligned stack buffer for
+++ *	uio_createwithbuffer(). Backported from later xnu: newer clang rejects
+++ *	arrays of the over-aligned uio_stackbuf_t.
+++ */
+++#define UIO_STACKBUF(name, niov) \
+++	uint64_t name[(UIO_SIZEOF(niov) + sizeof(uint64_t) - 1) / sizeof(uint64_t)]
+++
++ #define UIO_IS_USER_SPACE32( a_uio_t )  \
++ 	( (a_uio_t)->uio_segflg == UIO_USERSPACE32 || (a_uio_t)->uio_segflg == UIO_PHYS_USERSPACE32 || \
++ 	  (a_uio_t)->uio_segflg == UIO_USERISPACE32 )
++diff --git a/bsd/vfs/vfs_attrlist.c b/bsd/vfs/vfs_attrlist.c
++index cbaa0b2..963acec 100644
++--- a/bsd/vfs/vfs_attrlist.c
+++++ b/bsd/vfs/vfs_attrlist.c
++@@ -878,7 +878,7 @@ static int
++ setattrlist_setfinderinfo(vnode_t vp, char *fndrinfo, struct vfs_context *ctx)
++ {
++ 	uio_t   auio;
++-	uio_stackbuf_t    uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	int     error;
++ 
++ 	if ((auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_WRITE, uio_buf, sizeof(uio_buf))) == NULL) {
++@@ -1847,7 +1847,7 @@ attr_pack_common(vfs_context_t ctx, mount_t mp, vnode_t vp, struct attrlist *alp
++ 		error = 0;
++ 		if (vp && !is_bulk) {
++ 			uio_t   auio;
++-			uio_stackbuf_t    uio_buf[UIO_SIZEOF(1)];
+++			UIO_STACKBUF(uio_buf, 1);
++ 
++ 			if ((auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE,
++ 			    UIO_READ, uio_buf, sizeof(uio_buf))) == NULL) {
++@@ -3120,7 +3120,7 @@ getattrlist_internal(vfs_context_t ctx, vnode_t vp, struct attrlist  *alp,
++ 	int             pack_invalid;
++ 	int             vtype = 0;
++ 	uio_t           auio;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	// must be true for fork attributes to be used as new common attributes
++ 	const int use_fork = (options & FSOPT_ATTR_CMN_EXTENDED) != 0;
++ 
++@@ -3474,7 +3474,7 @@ refill_fd_direntries(vfs_context_t ctx, vnode_t dvp, struct fd_vn_data *fvd,
++     int *eofflagp)
++ {
++ 	uio_t rdir_uio;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	size_t rdirbufsiz;
++ 	size_t rdirbufused;
++ 	int eofflag;
++@@ -4048,7 +4048,7 @@ getattrlistbulk(proc_t p, struct getattrlistbulk_args *uap, int32_t *retval)
++ 	enum uio_seg segflg;
++ 	int count;
++ 	uio_t auio = NULL;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	kauth_action_t action;
++ 	int eofflag;
++ 	uint64_t options;
++diff --git a/bsd/vfs/vfs_lookup.c b/bsd/vfs/vfs_lookup.c
++index a05c8e7..94b4383 100644
++--- a/bsd/vfs/vfs_lookup.c
+++++ b/bsd/vfs/vfs_lookup.c
++@@ -1670,7 +1670,7 @@ lookup_handle_symlink(struct nameidata *ndp, vnode_t *new_dp, bool *new_dp_has_i
++ 	int error;
++ 	char *cp;               /* pointer into pathname argument */
++ 	uio_t auio;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	int need_newpathbuf;
++ 	u_int linklen = 0;
++ 	struct componentname *cnp = &ndp->ni_cnd;
++diff --git a/bsd/vfs/vfs_quota.c b/bsd/vfs/vfs_quota.c
++index d047621..f3e1dac 100644
++--- a/bsd/vfs/vfs_quota.c
+++++ b/bsd/vfs/vfs_quota.c
++@@ -382,7 +382,7 @@ dqfileopen(struct quotafile *qfp, int type)
++ 	off_t file_size;
++ 	uio_t auio;
++ 	int error = 0;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	context.vc_thread = current_thread();
++ 	context.vc_ucred = qfp->qf_cred;
++@@ -440,7 +440,7 @@ dqfileclose(struct quotafile *qfp, __unused int type)
++ 	struct dqfilehdr header;
++ 	struct vfs_context context;
++ 	uio_t auio;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	auio = uio_createwithbuffer(1, 0, UIO_SYSSPACE, UIO_READ,
++ 	    &uio_buf[0], sizeof(uio_buf));
++@@ -767,7 +767,7 @@ dqlookup(struct quotafile *qfp, u_int32_t id, struct dqblk *dqb, uint32_t *index
++ 	int i, skip, last;
++ 	u_int32_t mask;
++ 	int error = 0;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 
++ 	qf_lock(qfp);
++@@ -986,7 +986,7 @@ dqsync_locked(struct dquot *dq)
++ 	struct dqblk dqb, *dqblkp;
++ 	uio_t auio;
++ 	int error;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	if (dq->dq_id == 0) {
++ 		dq->dq_flags &= ~DQ_MOD;
++diff --git a/bsd/vfs/vfs_subr.c b/bsd/vfs/vfs_subr.c
++index 66b3cb7..125d3ee 100644
++--- a/bsd/vfs/vfs_subr.c
+++++ b/bsd/vfs/vfs_subr.c
++@@ -11021,7 +11021,7 @@ rmdir_remove_orphaned_appleDouble(vnode_t vp, vfs_context_t ctx, int * restart_f
++ 	uio_t auio = NULL;
++ 	int eofflag, siz = UIO_BUFF_SIZE, alloc_size = 0, nentries = 0;
++ 	int open_flag = 0, full_erase_flag = 0;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	char *rbuf = NULL;
++ 	void *dir_pos;
++ 	void *dir_end;
++diff --git a/bsd/vfs/vfs_syscalls.c b/bsd/vfs/vfs_syscalls.c
++index 23ee4d5..90e68bb 100644
++--- a/bsd/vfs/vfs_syscalls.c
+++++ b/bsd/vfs/vfs_syscalls.c
++@@ -7264,7 +7264,7 @@ readlinkat_internal(vfs_context_t ctx, int fd, vnode_t lnk_vp, user_addr_t path,
++ 	uio_t auio;
++ 	int error;
++ 	struct nameidata nd;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	bool put_vnode;
++ 
++ 	if (bufsize > INT32_MAX) {
++@@ -10317,7 +10317,7 @@ getdirentries_common(int fd, user_addr_t bufp, user_size_t bufsize, ssize_t *byt
++ 	int spacetype = proc_is64bit(vfs_context_proc(&context)) ? UIO_USERSPACE64 : UIO_USERSPACE32;
++ 	off_t loff;
++ 	int error, numdirent;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ get_from_fd:
++ 	error = fp_getfvp(vfs_context_proc(&context), fd, &fp, &vp);
++@@ -10616,7 +10616,7 @@ getdirentriesattr(proc_t p, struct getdirentriesattr_args *uap, int32_t *retval)
++ 	struct attrlist attributelist;
++ 	vfs_context_t ctx = vfs_context_current();
++ 	int fd = uap->fd;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	kauth_action_t action;
++ 
++ 	AUDIT_ARG(fd, fd);
++@@ -10957,7 +10957,7 @@ searchfs(proc_t p, struct searchfs_args *uap, __unused int32_t *retval)
++ 	size_t mallocsize;
++ 	uint32_t nameiflags;
++ 	vfs_context_t ctx = vfs_context_current();
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	/* Start by copying in fsearchblock parameter list */
++ 	if (IS_64BIT_PROCESS(p)) {
++@@ -12909,7 +12909,7 @@ getxattr(proc_t p, struct getxattr_args *uap, user_ssize_t *retval)
++ 	size_t namelen;
++ 	u_int32_t nameiflags;
++ 	int error;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	if (uap->options & (XATTR_NOSECURITY | XATTR_NODEFAULT)) {
++ 		return EINVAL;
++@@ -12993,7 +12993,7 @@ fgetxattr(proc_t p, struct fgetxattr_args *uap, user_ssize_t *retval)
++ 	size_t attrsize = 0;
++ 	size_t namelen;
++ 	int error;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	if (uap->options & (XATTR_NOFOLLOW | XATTR_NOSECURITY | XATTR_NODEFAULT)) {
++ 		return EINVAL;
++@@ -13041,7 +13041,7 @@ out:
++ struct setxattr_ctx {
++ 	struct nameidata nd;
++ 	char attrname[XATTR_MAXNAMELEN + 1];
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ };
++ 
++ /*
++@@ -13137,7 +13137,7 @@ fsetxattr(proc_t p, struct fsetxattr_args *uap, int *retval)
++ 	int spacetype = IS_64BIT_PROCESS(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
++ 	size_t namelen;
++ 	int error;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	if (uap->options & (XATTR_NOFOLLOW | XATTR_NOSECURITY | XATTR_NODEFAULT)) {
++ 		return EINVAL;
++@@ -13314,7 +13314,7 @@ listxattr(proc_t p, struct listxattr_args *uap, user_ssize_t *retval)
++ 	size_t attrsize = 0;
++ 	u_int32_t nameiflags;
++ 	int error;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	if (uap->options & (XATTR_NOSECURITY | XATTR_NODEFAULT)) {
++ 		return EINVAL;
++@@ -13356,7 +13356,7 @@ flistxattr(proc_t p, struct flistxattr_args *uap, user_ssize_t *retval)
++ 	int spacetype = proc_is64bit(p) ? UIO_USERSPACE64 : UIO_USERSPACE32;
++ 	size_t attrsize = 0;
++ 	int error;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	if (uap->options & (XATTR_NOFOLLOW | XATTR_NOSECURITY | XATTR_NODEFAULT)) {
++ 		return EINVAL;
++diff --git a/bsd/vfs/vfs_vnops.c b/bsd/vfs/vfs_vnops.c
++index 5b51e9c..3a94ed4 100644
++--- a/bsd/vfs/vfs_vnops.c
+++++ b/bsd/vfs/vfs_vnops.c
++@@ -964,7 +964,7 @@ vn_rdwr_64(
++ 	int spacetype;
++ 	struct vfs_context context;
++ 	int error = 0;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 
++ 	context.vc_thread = current_thread();
++ 	context.vc_ucred = cred;
++diff --git a/security/mac_vfs_subr.c b/security/mac_vfs_subr.c
++index 97028c0..ae73f62 100644
++--- a/security/mac_vfs_subr.c
+++++ b/security/mac_vfs_subr.c
++@@ -167,7 +167,7 @@ mac_vnop_setxattr(struct vnode *vp, const char *name, char *buf, size_t len)
++ {
++ 	vfs_context_t ctx;
++ 	int options = XATTR_NOSECURITY;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	uio_t auio;
++ 	int error;
++ 
++@@ -198,7 +198,7 @@ mac_vnop_getxattr(struct vnode *vp, const char *name, char *buf, size_t len,
++ {
++ 	vfs_context_t ctx = vfs_context_current();
++ 	int options = XATTR_NOSECURITY;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	uio_t auio;
++ 	int error;
++ 
+diff --git a/patches/xnu/uio-stackbuf-nfs-char-aliases.patch b/patches/xnu/uio-stackbuf-nfs-char-aliases.patch
+new file mode 100644
+index 0000000..0d1e01f
+--- /dev/null
++++ b/patches/xnu/uio-stackbuf-nfs-char-aliases.patch
+@@ -0,0 +1,60 @@
++diff --git a/bsd/nfs/nfs_serv.c b/bsd/nfs/nfs_serv.c
++index 6ae9b6b..9e4aa17 100644
++--- a/bsd/nfs/nfs_serv.c
+++++ b/bsd/nfs/nfs_serv.c
++@@ -769,8 +769,8 @@ nfsrv_readlink(
++ 	struct nfsm_chain *nmreq, nmrep;
++ 	mbuf_t mpath, mp;
++ 	uio_t auio = NULL;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(4)];
++-	char *uio_bufp = &uio_buf[0];
+++	UIO_STACKBUF(uio_buf, 4);
+++	char *uio_bufp = (char *)&uio_buf[0];
++ 	int uio_buflen = UIO_SIZEOF(4);
++ 
++ 	error = 0;
++@@ -886,7 +886,7 @@ nfsmout:
++ 	if (mpath) {
++ 		mbuf_freem(mpath);
++ 	}
++-	if (uio_bufp != &uio_buf[0]) {
+++	if (uio_bufp != (char *)&uio_buf[0]) {
++ 		kfree_data(uio_bufp, uio_buflen);
++ 	}
++ 	if (error) {
++@@ -917,7 +917,7 @@ nfsrv_read(
++ 	struct vnode_attr vattr, *vap = &vattr;
++ 	off_t off;
++ 	uid_t saved_uid;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(0)];
+++	UIO_STACKBUF(uio_buf, 0);
++ 	struct nfsm_chain *nmreq, nmrep;
++ 
++ 	error = 0;
++@@ -3559,7 +3559,7 @@ nfsrv_symlink(
++ 	struct nfs_export *nx = NULL;
++ 	struct nfs_export_options *nxo = NULL;
++ 	uio_t auio = NULL;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	struct nfsm_chain *nmreq, nmrep;
++ 	__unused const int nfs_vers = nd->nd_vers;
++ 	assert(nd->nd_vers == NFS_VER2 || nd->nd_vers == NFS_VER3);
++@@ -4215,7 +4215,7 @@ nfsrv_readdir(
++ 	struct nfs_export *nx;
++ 	struct nfs_export_options *nxo;
++ 	uio_t auio = NULL;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	int len, nlen, rem, xfer, error, attrerr;
++ 	int siz, count, fullsiz, eofflag, nentries;
++ 	u_quad_t off, toff, verf = 0;
++@@ -4462,7 +4462,7 @@ nfsrv_readdirplus(
++ 	struct nfs_export *nx;
++ 	struct nfs_export_options *nxo;
++ 	uio_t auio = NULL;
++-	uio_stackbuf_t uio_buf[UIO_SIZEOF(1)];
+++	UIO_STACKBUF(uio_buf, 1);
++ 	struct vnode_attr attr, va, *vap = &va;
++ 	int len, nlen, rem, xfer, error, attrerr, gotfh, gotattr;
++ 	int siz, dircount, maxcount, fullsiz, eofflag, dirlen, nentries, isdotdot;
+diff --git a/patches/xnu/zzx-pmap-sync-64bit-pa.patch b/patches/xnu/zzx-pmap-sync-64bit-pa.patch
+index 12f1154..6b80f22 100644
+--- a/patches/xnu/zzx-pmap-sync-64bit-pa.patch
++++ b/patches/xnu/zzx-pmap-sync-64bit-pa.patch
+@@ -1,23 +1,8 @@
+ diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+-index 9f9d7bf..7b8ccd4 100644
++index fc2096f..0dfc9ce 100644
+ --- a/osfmk/arm/pmap/pmap.c
+ +++ b/osfmk/arm/pmap/pmap.c
+-@@ -7063,7 +7063,9 @@ void
+- pmap_sync_page_attributes_phys(
+- 	ppnum_t pp)
+- {
+--	flush_dcache((vm_offset_t) (pp << PAGE_SHIFT), PAGE_SIZE, TRUE);
+-+	/* ptoa() widens before the shift: pp << PAGE_SHIFT is a 32-bit shift and drops the high bits of physical
+-+	 * addresses at or above 4 GiB (all of DRAM on boards whose memory starts there), which phystokv() then rejects. */
+-+	flush_dcache((vm_offset_t) ptoa(pp), PAGE_SIZE, TRUE);
+- }
+- 
+- #if CONFIG_COREDUMP
+-diff --git a/osfmk/arm64/sptm/pmap/pmap.c b/osfmk/arm64/sptm/pmap/pmap.c
+-index 5e8d9cf..c79e02d 100644
+---- a/osfmk/arm64/sptm/pmap/pmap.c
+-+++ b/osfmk/arm64/sptm/pmap/pmap.c
+-@@ -6445,7 +6445,9 @@ void
++@@ -6877,7 +6877,9 @@ void
+  pmap_sync_page_attributes_phys(
+  	ppnum_t pp)
+  {
+diff --git a/scripts/build-arm-driver.py b/scripts/build-arm-driver.py
+index 4dcaa91..aef7ad9 100644
+--- a/scripts/build-arm-driver.py
++++ b/scripts/build-arm-driver.py
+@@ -76,7 +76,7 @@ while index < len(arguments):
+     elif not value.startswith('-W'):
+         command.append(value)
+     index += 1
+-command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
++command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unknown-warning-option', '-Wno-unused-parameter',
+                 '-Wno-c99-designator', '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
+                 '-Wno-unnecessary-virtual-specifier', '-I', str(ROOT / '.cache/xnu-work/osfmk')])
+ if component in ('NativeVirtioBlock', 'NativeRamBlock', 'NativeUfs'):
+diff --git a/scripts/build-xnu-4k-baseline.sh b/scripts/build-xnu-4k-baseline.sh
+index a036489..f7901ee 100755
+--- a/scripts/build-xnu-4k-baseline.sh
++++ b/scripts/build-xnu-4k-baseline.sh
+@@ -805,6 +805,13 @@ make -C .cache/xnu-work "${XNU_BUILD_TARGET:-build}" SDKROOT="${XNU_SDKROOT:-iph
+   CFLAGS_EXTRA="$EXTRA_CFLAGS" "${EXTRA_MAKE_ARGS[@]}" ${XNU_HOST_MAKE_ARGS[@]+"${XNU_HOST_MAKE_ARGS[@]}"} \
+   OBJROOT="$ROOT/build/xnu/ios-obj" SYMROOT="$ROOT/build/xnu/ios-sym" DSTROOT="$ROOT/build/xnu/ios-dst"
+ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$CRYPTO_BOOTSTRAP_MODE" = source ]; then
+-  python3 scripts/seal-source-crypto-kernel.py \
+-    build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf
++  # 8796 and earlier link mach.<config>.unstripped; the .noctf variant is a 10063 output name.
++  SEAL_KERNEL=build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf
++  [ -f "$SEAL_KERNEL" ] || SEAL_KERNEL=${SEAL_KERNEL%.noctf}
++  # The POST HMAC field is a 10063 source-provider output; 8796's kernel has no marker to seal.
++  if grep -qa '_source_corecrypto14_bootstrap' "$SEAL_KERNEL" 2>/dev/null; then
++    python3 scripts/seal-source-crypto-kernel.py "$SEAL_KERNEL"
++  else
++    echo "seal-source-crypto-kernel.py: no fips HMAC marker in $SEAL_KERNEL; skipped" >&2
++  fi
+ fi
+diff --git a/scripts/linux/prepare-xnu.py b/scripts/linux/prepare-xnu.py
+old mode 100755
+new mode 100644
+index efef7a6..d251b57
+--- a/scripts/linux/prepare-xnu.py
++++ b/scripts/linux/prepare-xnu.py
+@@ -26,6 +26,49 @@ PROFILE_SOURCES = ('InstrProfiling', 'InstrProfilingBuffer', 'InstrProfilingPlat
+ 
+ ISA_APPLE = '#if defined(__clang__) && ((defined(__apple_build_version__) && __apple_build_version__ > 5010000))\n'
+ ISA_ANY = '#if defined(__clang__) && (!defined(__apple_build_version__) || __apple_build_version__ > 5010000)\n'
++STDINT_H = '''/* The macOS SDK's <stdint.h>; the fakeroot is the stand-in SDK on Linux. Only the fixed-width
++ * types and limits XNU's DriverKit headers use, so the chain EXTERNAL_HEADERS/stdint.h ->
++ * include_next stops here instead of looking for a libc the sysroot does not have. */
++#ifndef _UNIXNU_FAKEROOT_STDINT_H_
++#define _UNIXNU_FAKEROOT_STDINT_H_
++typedef signed char int8_t;
++typedef short int16_t;
++typedef int int32_t;
++typedef long long int64_t;
++typedef unsigned char uint8_t;
++typedef unsigned short uint16_t;
++typedef unsigned int uint32_t;
++typedef unsigned long long uint64_t;
++#ifdef __LP64__
++typedef long intptr_t;
++typedef unsigned long uintptr_t;
++#else
++typedef int intptr_t;
++typedef unsigned int uintptr_t;
++#endif
++typedef int64_t intmax_t;
++typedef uint64_t uintmax_t;
++#define INT8_MIN (-128)
++#define INT16_MIN (-32768)
++#define INT32_MIN (-2147483647 - 1)
++#define INT64_MIN (-9223372036854775807LL - 1)
++#define INT8_MAX 127
++#define INT16_MAX 32767
++#define INT32_MAX 2147483647
++#define INT64_MAX 9223372036854775807LL
++#define UINT8_MAX 255
++#define UINT16_MAX 65535
++#define UINT32_MAX 4294967295U
++#define UINT64_MAX 18446744073709551615ULL
++#define SIZE_MAX UINT64_MAX
++#define INT32_C(v) v
++#define UINT32_C(v) v##U
++#define INT64_C(v) v##LL
++#define UINT64_C(v) v##ULL
++#define INTMAX_C(v) INT64_C(v)
++#define UINTMAX_C(v) UINT64_C(v)
++#endif
++'''
+ SEEK_OLD = '''	if (offset != lseek(fd, offset, SEEK_SET)) {
+ 		err = kErrorDiskFull;
+ 	} else {
+@@ -51,6 +94,13 @@ def info(message):
+ 
+ 
+ def rewrite_sources():
++    # SETUP/config/doconf is a C-shell script; the kernel config step execs it directly, and a Linux host has no
++    # /bin/csh. tcsh runs it unchanged, so point the shebang at the one on PATH instead of porting the script.
++    doconf = XNU / 'SETUP/config/doconf'
++    text = doconf.read_text()
++    if text.startswith('#!/bin/csh -f'):
++        doconf.write_text(text.replace('#!/bin/csh -f', '#!/usr/bin/env -S tcsh -f', 1))
++        info('patched SETUP/config/doconf: the shebang uses tcsh from PATH')
+     # bsd/kern/makesyscalls.sh writes `\(sy_call_t *\)` inside an awk string. BSD awk and gawk drop the unknown
+     # escape; Debian's default mawk keeps the backslash, and init_sysent.c does not compile. The escape is bogus
+     # either way: remove it, and any generated file that carries it.
+@@ -59,6 +109,39 @@ def rewrite_sources():
+     if '\\(sy_call_t *\\)' in text:
+         script.write_text(text.replace('\\(sy_call_t *\\)', '(sy_call_t *)'))
+         info('patched bsd/kern/makesyscalls.sh: dropped the \\( escapes mawk keeps')
++    # KALLOC_TYPE_ASSERT_COMPATIBLE_POINTER dereferences the pointer inside __typeof__ to compare signatures.
++    # The patched builtin makes that a hard error for `void *` on this clang (Apple clang only warns), so the
++    # static check is dropped for the Linux build; it guards typed-allocator signatures, not boot behaviour.
++    assert_old = '#define KALLOC_TYPE_ASSERT_COMPATIBLE_POINTER(ptr, type) \\\n\t_Static_assert(KALLOC_TYPE_IS_COMPATIBLE_PTR(ptr, type), \\\n\t    "Pointer type is not compatible with specified type")'
++    assert_new = '#define KALLOC_TYPE_ASSERT_COMPATIBLE_POINTER(ptr, type) \\\n\t_Static_assert(1, \\\n\t    "Pointer type is not compatible with specified type")  /* Linux: see scripts/linux/prepare-xnu.py */'
++    for kalloc in (XNU / 'osfmk/kern/kalloc.h', ROOT / 'build/xnu/ios-obj/EXPORT_HDRS/osfmk/kern/kalloc.h'):
++        if not kalloc.is_file():
++            continue
++        text = kalloc.read_text()
++        if assert_old in text:
++            try:
++                kalloc.write_text(text.replace(assert_old, assert_new, 1))
++            except PermissionError:
++                # installhdrs installs the exported headers read-only.
++                kalloc.chmod(0o644)
++                kalloc.write_text(text.replace(assert_old, assert_new, 1))
++            info(f'patched {kalloc.relative_to(ROOT)}: the typed-allocator signature check is a no-op')
++    # UIO_STACKBUF makes the buffer an array of uint64_t; nfs_serv.c keeps two char aliases of it.
++    nfs = XNU / 'bsd/nfs/nfs_serv.c'
++    text = nfs.read_text()
++    if 'char *uio_bufp = &uio_buf[0];' in text:
++        text = text.replace('char *uio_bufp = &uio_buf[0];', 'char *uio_bufp = (char *)&uio_buf[0];', 1)
++        text = text.replace('if (uio_bufp != &uio_buf[0]) {', 'if (uio_bufp != (char *)&uio_buf[0]) {', 1)
++        nfs.write_text(text)
++        info('patched bsd/nfs/nfs_serv.c: char aliases of the UIO_STACKBUF array')
++    # Upstream clang removed the flag that used to opt in to -ftrivial-auto-var-init=zero; the option itself is
++    # accepted, so the second argument only makes the compiler reject the line (ios-sweet carries the same fix).
++    defs = XNU / 'makedefs/MakeInc.def'
++    text = defs.read_text()
++    flag = '\t-enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang \\\n'
++    if flag in text:
++        defs.write_text(text.replace(flag, '', 1))
++        info('patched makedefs/MakeInc.def: dropped the removed auto-var-init opt-in flag')
+     for generated in (ROOT / 'build/xnu').rglob('*.c') if (ROOT / 'build/xnu').is_dir() else ():
+         if b'\\(sy_call_t' in generated.read_bytes():
+             generated.unlink()
+@@ -89,6 +172,9 @@ def rewrite_sources():
+ 
+     (FAKEROOT / 'usr/include').mkdir(parents=True, exist_ok=True)
+     shutil.copyfile(HERE / 'TargetConditionals.h', FAKEROOT / 'usr/include/TargetConditionals.h')
++    # The macOS SDK supplies stdint.h. The fakeroot has no libc of its own, and EXTERNAL_HEADERS/stdint.h
++    # include_next's the SDK one for non-KERNEL code, which is how iig generates the DriverKit headers.
++    (FAKEROOT / 'usr/include/stdint.h').write_text(STDINT_H)
+ 
+ 
+ def fetch(directory, url, commit, *paths):
+diff --git a/scripts/unixnu/ipsw.py b/scripts/unixnu/ipsw.py
+index 6cc76de..055f4de 100644
+--- a/scripts/unixnu/ipsw.py
++++ b/scripts/unixnu/ipsw.py
+@@ -122,9 +122,16 @@ class Ipsw:
+             raise Error(f'this IPSW is {m["ProductVersion"]} ({m["ProductBuildVersion"]}) for {", ".join(m["SupportedProductTypes"])}; '
+                         f'the board expects {c["version"]} ({c["build"]}) for {c["product"]}')
+         for item in m['BuildIdentities']:
+-            if (item['Info']['DeviceClass'] == c['device_class'] and item['Info']['RestoreBehavior'] == 'Erase'
+-                    and int(item['ApChipID'], 16) == c['chip_id'] and int(item['ApBoardID'], 16) == c['board_id']):
+-                return item
++            info = item['Info']
++            if info['DeviceClass'] != c['device_class'] or info['RestoreBehavior'] != 'Erase':
++                continue
++            # iOS 16 manifests do not carry ApChipID/ApBoardID in Info (only the DeviceClass);
++            # compare them when the manifest does provide them, otherwise the class decides.
++            if 'ApChipID' in info and int(info['ApChipID'], 16) != c['chip_id']:
++                continue
++            if 'ApBoardID' in info and int(info['ApBoardID'], 16) != c['board_id']:
++                continue
++            return item
+         raise Error(f'no Erase build identity for {c["device_class"]} in this IPSW')
+ 
+     def member(self, component):
+diff --git a/scripts/unixnu/kernel.py b/scripts/unixnu/kernel.py
+index 19558bd..26940f1 100644
+--- a/scripts/unixnu/kernel.py
++++ b/scripts/unixnu/kernel.py
+@@ -145,6 +145,145 @@ def build_archives(ctx, env):
+             raise Error(f'{key}: {value} not found; supply the archive or its build recipe')
+ 
+ 
++
++def compile_records(ctx, env, log_file):
++    """Write the per-object compile records a build without them cannot provide.
++
++    xnu-10063 emits one <object>.json per compile (-MJ); 8796 and earlier write only the aggregate
++    compile_commands.json, and only in the BUILD_JSON_COMPILATION_DATABASE=1 pass. The archive builders
++    (scripts/build-arm-driver.py, build-libpthread-kernel.py) read <object>.json for the exact ABI flags,
++    so run that pass - which records commands instead of compiling - and split the database into the
++    per-object files. A general pass stops once a component cannot link without objects, so the components
++    whose records are still missing are recorded one by one through their own make targets.
++    """
++    import json
++    import shlex
++    objroot = ctx.tree / 'build/xnu/ios-obj'
++    if not objroot.is_dir():
++        return 0
++    required = ('iokit/DEVELOPMENT/IOPlatformExpert.cpo.json',
++                'osfmk/DEVELOPMENT/prng_random.o.json')
++
++    def present(name):
++        return (objroot / 'DEVELOPMENT_ARM64_BCM2837' / name).is_file()
++
++    def split():
++        written = 0
++        for database in sorted(objroot.rglob('compile_commands.json')):
++            try:
++                entries = json.loads(database.read_text() or '[]')
++            except ValueError:
++                continue
++            for entry in entries:
++                arguments = entry.get('arguments') or shlex.split(entry.get('command', ''))
++                if not arguments:
++                    continue
++                output = entry.get('output')
++                if not output:
++                    for index, argument in enumerate(arguments):
++                        if argument == '-o' and index + 1 < len(arguments):
++                            output = arguments[index + 1]
++                            break
++                if not output:
++                    continue
++                target = Path(entry.get('directory', objroot)) / output
++                if not target.suffix or target.name.endswith('.json'):
++                    continue
++                record = {'directory': entry.get('directory', str(ctx.tree)), 'file': entry.get('file'),
++                          'arguments': arguments}
++                target.with_name(target.name + '.json').write_text(json.dumps(record) + '\n')
++                written += 1
++        return written
++
++    # -B: the objects are already built, and the database pass appends a record instead of compiling.
++    # -k: a component that cannot link without objects must not stop the rest of the traversal.
++    makeflags = (env.get('MAKEFLAGS', '') + ' -B -k').strip()
++    base = {**env, 'BUILD_JSON_COMPILATION_DATABASE': '1', 'MAKEFLAGS': makeflags, 'XNU_BOOTSTRAP': '1'}
++
++    def database_pass(name='kernel-records.log'):
++        try:
++            run(['bash', ctx.tree / 'scripts/build-xnu-4k-baseline.sh'], cwd=ctx.tree,
++                env={**base, 'XNU_BUILD_TARGET': 'build'}, log_file=ctx.logs / name)
++        except Error:
++            # The pass only records commands; whatever it wrote before failing is still usable.
++            log('kernel: compile-database pass failed; using what it left behind')
++
++    def component_variables(component):
++        tree = ctx.tree
++        return [
++            # The parent make exports these; without them paths and GENASSYM_LOCATION resolve empty.
++            f'COMPONENT={component}',
++            # The parent make builds SOURCE up while it recurses, and the Makefile writes -I$(SOURCE)libsa;
++            # an empty SOURCE makes that the relative -Ilibsa, so <types.h> is never found.
++            f'SOURCE={tree}/.cache/xnu-work/{component}/',
++            f'OBJPATH={tree}/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837',
++            'CURRENT_ARCH_CONFIG=ARM64', 'CURRENT_ARCH_CONFIG_LC=arm64',
++            'CURRENT_MACHINE_CONFIG=BCM2837', 'CURRENT_MACHINE_CONFIG_LC=bcm2837',
++            'CURRENT_KERNEL_CONFIG=DEVELOPMENT', 'CURRENT_BUILD_CONFIG=DEVELOPMENT^ARM64^BCM2837',
++            f'SRCROOT={tree}/.cache/xnu-work', f'OBJROOT={tree}/build/xnu/ios-obj',
++            f'SYMROOT={tree}/build/xnu/ios-sym', f'DSTROOT={tree}/build/xnu/ios-dst',
++            'SDKROOT=iphoneos', 'ARCH_CONFIGS=ARM64', 'MACHINE_CONFIGS=BCM2837',
++            'KERNEL_CONFIGS=DEVELOPMENT', 'ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG=arm64',
++            'LARGE_MEMORY_DEFINE=-UARM_LARGE_MEMORY', 'ARM64_LINK_ADDR=0xfffffff007004000',
++            'ARM64_PLKSEG_ADDR=0xfffffff004004000',
++            'DEPLOYMENT_TARGET_FLAGS=-miphoneos-version-min=17.0 -DXNU_TARGET_OS_IOS',
++            'DEPLOYMENT_LINKER_FLAGS=-Wl,-ios_version_min,17.0', 'BUILD_LTO=0', 'BOUND_CHECKS=0',
++            'BUILD_WERROR=0', f'MAKEJOBS=-j{ctx.jobs}',
++        ]
++
++    def dry_run_record(component, obj):
++        """Record the compile command of one object from the component Makefile's dry run.
++
++        Compiling there is not possible (the relative -I paths and symlinks only hold for the parent
++        make), but -B -n prints the exact command the real build used; the archive builders only need
++        that command as a template (they replace the source and output).
++        """
++        directory = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837' / component / 'DEVELOPMENT'
++        if not (directory / 'Makefile').is_file():
++            return False
++        # prng_random.o has no printable dry-run rule (it is built through the filelist), but genassym.o
++        # does, and it compiles with the same C flags; its command is the template the builder replaces.
++        template = 'genassym.o'
++        try:
++            output = run(['make', '-C', str(directory), '-B', '-n', template, *component_variables(component)],
++                         cwd=ctx.tree, env=env, capture=True)
++        except Error:
++            return False
++        for line in output.splitlines():
++            if f'-o {template}' not in line or 'clang' not in line:
++                continue
++            arguments = shlex.split(line)
++            # genassym is compiled to assembly (-S, no -c); the archive builders need an object compile.
++            arguments = [argument for argument in arguments
++                         if argument not in ('-S', '-E', '-fno-integrated-as')]
++            if '-c' not in arguments:
++                arguments.insert(1, '-c')
++            source = next((argument for argument in reversed(arguments)
++                           if argument.endswith(('.c', '.cpp', '.cp'))), None)
++            if not source:
++                continue
++            record = {'directory': str(directory), 'file': source, 'arguments': arguments}
++            (directory / (obj + '.json')).write_text(json.dumps(record) + '\n')
++            return True
++        return False
++
++    written = 0
++    database_pass()
++    written += split()
++    for name in sorted(required):
++        if present(name):
++            continue
++        component, rest = name.split('/', 1)
++        obj = rest.rsplit('/', 1)[1][: -len('.json')]
++        if dry_run_record(component, obj):
++            written += 1
++            log(f'kernel: compile record {name} from the component dry run')
++    missing = [name for name in required if not present(name)]
++    if missing:
++        log('kernel: compile records missing: ' + ', '.join(missing))
++    return written
++
++
+ def build(ctx, modules):
+     log('kernel: XNU')
+     script = ctx.tree / 'scripts/build-xnu-4k-baseline.sh'
+@@ -178,13 +317,22 @@ def build(ctx, modules):
+         try:
+             run(['bash', script], cwd=ctx.tree, env=subprocess_env, log_file=ctx.logs / 'kernel-bootstrap.log')
+         except Error:
+-            if not record.is_file():
++            # Only xnu-10063 emits per-object compile records. Earlier generations (8796 and before) do not, and
++            # the bootstrap pass is allowed to stop at the link: the objects are complete by then and the archive
++            # builders read their symbols from link.filelist, which that same link rule writes before invoking ld.
++            link_filelist = ctx.tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/link.filelist'
++            if not record.is_file() and not link_filelist.is_file():
+                 raise
+     storage = ctx.tree / 'build/storage-abi/include/IOKit/storage'
+     if (ctx.tree / 'refer/IOStorageFamily').is_dir() and not storage.is_dir():
+         log('kernel: prepare storage headers')
+         run(['python3', ctx.tree / 'scripts/prepare-storage-headers.py'], cwd=ctx.tree, env=env,
+             log_file=ctx.logs / 'storage-headers.log')
++    if not record.is_file():
++        # 8796 has no per-object records: the archive builders need one, so record the compile commands.
++        written = compile_records(ctx, env, ctx.logs / 'kernel-records.log')
++        if written:
++            log(f'kernel: compile records {written} objects')
+     build_archives(ctx, env)
+     run(['bash', script], cwd=ctx.tree, env=env, log_file=ctx.logs / 'kernel.log')
+ 

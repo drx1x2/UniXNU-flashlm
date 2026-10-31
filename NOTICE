@@ -1,0 +1,9 @@
+Third-party notices
+
+patches/xnu/uio-stackbuf-new-clang.patch
+  From dipa-studio/ios-sweet (MIT License, Copyright (c) 2026 dipa-studio):
+  the UIO_STACKBUF backport for current clang. Unmodified except that the
+  bsd/nfs/nfs_serv.c hunks live in patches/xnu/uio-stackbuf-nfs-char-aliases.patch.
+
+The XNU patches under patches/xnu/ and the UniXNU build driver are from
+UniXNU (https://github.com/UniXNU/UniXNU) and Apple's open-source XNU.

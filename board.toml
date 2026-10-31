@@ -1,0 +1,131 @@
+# LG V50 ThinQ (flashlm, SM8150) device repository for UniXNU.
+#
+# 状态：P1 骨架（2026-10-29）。结构照 UniXNU-mh2lm（LG G8X，同厂同 SoC）移植，
+# 板级数值来自 Project Aloha 的 lg-flash 目标（PlatformMemoryMapLib / PCD）
+# 与 devices.py 中已核对的来源；未在真机/DTB 上核对的都标 TODO(verify)。
+
+[board]
+name = "flashlm"
+soc = "SM8150"
+description = "LG V50 ThinQ (LM-V500, flashlm)"
+kit = "flashlm"
+
+[firmware]
+# 我们不跑 unixnu 的 firmware 步骤（本仓库用 Project-Aloha 的 mu_aloha_platforms 树，
+# 布局与 uefi-sheng 不同），这一节只给 unixnu status/bootimg 读参数用。
+# Aloha 树里已有现成的 lg-flash 设备目标（Device/lg-flash：内存映射、DTB、PCD 齐全），
+# 这是本设备与 mh2lm 最大的不同——UEFI 侧不用从零移植。
+config = "flashlm"
+dsc = "Platforms/SurfaceDuo1Pkg/SurfaceDuo1.dsc"
+fd = "Build/SurfaceDuo1Pkg/{target}_CLANGPDB/FV/SM8150_EFI.fd"
+submodules = [
+  "MU_BASECORE",
+  "Common/MU",
+  "Common/MU_OEM_SAMPLE",
+  "Features/DFCI",
+  "Features/CONFIG",
+  "Binaries",
+  "Platforms/OpensslPkg/Library/OpensslLib/openssl",
+]
+packages = [
+  "{uefi}/Platforms",
+  "{uefi}/Common/MU",
+  "{uefi}/Common/MU_OEM_SAMPLE",
+  "{uefi}/Features/DFCI",
+  "{uefi}/Features/CONFIG",
+  "{uefi}/Binaries",
+  "{uefi}/Silicon/QC/Sm8150",
+  "{tree}/package",
+  "{tree}/drivers/DarwinBoot",
+  "{edk2}",
+]
+
+[firmware.defines]
+TARGET_DEVICE = "lg-flash"
+# TODO(verify): Aloha 的 lg-flash 目标自带 DeviceTreeBlob/Android/android-flash.dtb；
+# 构建产物里的 FDT 文件名在第一次构建时确认（mh2lm 为 mh2lm.dtb，此处先按同规则写 flash.dtb）。
+FDT = "flash.dtb"
+# 本工作区的 crypto stub（NOSB：不打进真正的 crypto 驱动二进制包），与 mh2lm 同路线。
+SHARED_CRYPTO_PATH = "{workspace}/workarounds/crypto-stub"
+CONF_AUTOGEN_INCLUDE_PATH = "{uefi}/Platforms/SurfaceDuoFamilyPkg/Include"
+MU_SCHEMA_DIR = "{uefi}/Platforms/SurfaceDuoFamilyPkg/CfgData"
+MU_SCHEMA_FILE_NAME = "SurfaceDuoFamilyPkgCfgData.xml"
+
+[ipsw]
+# K-2: iPhone X（iPhone10,3 / D22AP）的 iOS 16.7.16，与 mh2lm/guacamole 同一身份。
+url = "https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77006/1158E502-D76D-4226-AA06-ED5E30CD1111/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw"
+product = "iPhone10,3"
+version = "16.7.16"
+build = "20H392"
+device_class = "d22ap"
+# ipsw.me / iPhone10,3：platform t8015（A11），cpid 32789 = 0x8015，bdid 6。
+chip_id = 0x8015
+board_id = 6
+# 只抽内核与设备树；StaticTrustCache / OS 等留到 M4 再要。
+fetch = ["KernelCache", "DeviceTree"]
+
+[ipsw.sha256]
+# 与 mh2lm 同一 IPSW（2026-10-28 实测回填，两个成员的 sha256）。
+"kernelcache.release.iphone10b" = "2d6a13d040aaf87cec09bb6906d43e9bd8cea951e43d1aa1cd62707dfdc5aaec"
+"DeviceTree.d22ap.im4p" = "480e8b0888949b4128b7aa2cd254497581c69e1bafa596a760b2fa955a8a6368"
+
+[kernel]
+defconfig = "flashlm_defconfig"
+# 归档构建器在内核链接前按序运行；M3 只放链接必需的（核心加密/线程/DT 平台/CPU）。
+archives = [
+  "build-corecrypto-14.py",
+  "build-corecrypto-14.py --namespace",
+  "build-arm-driver.py ArmDTPlatform",
+  "build-arm-driver.py ArmCpu",
+  "build-libpthread-kernel.py",
+]
+
+[os]
+# K-2: iPhone X / iOS 16.7.x 用户态 → Darwin 22.6.0 / xnu-8796
+xnu_version = "8796.141.3"
+xnu_revision = "1b191cb58250d0705d8a51287127505aa4bc0789"
+darwin = "22.6.0"
+
+[payload]
+volume = "FLASHSP"
+# 路线与 mh2lm 的 B1 相同：payload 走 FV 内的 512 KiB FAT12（手工镜像），
+# 不走 boot.img ramdisk——LG 的 ABL 对带大 ramdisk 的 boot.img 有
+# ram console / secure watchdog 检查（mh2lm 真机实测触发
+# "lge crash handler: secure watching bite! invalid ram console"）。
+# size_mib 只喂 `unixnu payload`（它写整数 MiB 的 FAT32），设 1 让它"吵着失败"，
+# 提示改用 FV 打包脚本。
+size_mib = 1
+loader = "firmware"
+# 菜单里要有 Tools 入口（Advanced Logger 扫码导出靠它）。
+tools = true
+title = "LG V50 - XNU"
+dram_size = "0xc0000000"
+panic_screen = false
+timeout = 3
+# 先按 mh2lm/guacamole 的一套起，等内核跑起来再逐个确认。
+kernel_args = [
+  "debug=0xc",
+  "serial=3",
+  "cpus=8",
+  "keepsyms=1",
+  "rd=ufsroot0",
+  "wdt=-1",
+]
+
+[payload.adt]
+tool = "scripts/make-flashlm-adt.py"
+# flashlm 的 ECID 还没读出来（P0 的 getvar 里确认）；先 optional。
+unique_chip_id = "optional"
+owned_memory_size = "0xc0000000"
+
+[bootimg.image]
+base = 0x0
+kernel_offset = 0x8000
+# Aloha lg-flash 内存映射里 "Kernel" 区是 0x80000000 + 0x02A00000（42 MiB，
+# 与 guacamole 相同，不是 mh2lm 的 6 MiB）。但 payload 默认走 FV 路线（见上），
+# boot.img 保持空 ramdisk；此偏移只作回退路线（≤32 MiB ramdisk）的记录。
+ramdisk_offset = 0x800000
+abl_base = 0x80000000
+tags_offset = 0x100
+pagesize = 4096
+header_version = 0

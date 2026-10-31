@@ -1,0 +1,16 @@
+# build outputs and caches
+out/
+.cache/
+__pycache__/
+*.pyc
+
+# Apple artifacts: fetch with `unixnu ipsw fetch`, never commit
+*.ipsw
+kernelcache.*
+DeviceTree.*.im4p
+scripts/base-d22ap.adt
+
+# device data
+*.img
+*.bin
+*.dmg
