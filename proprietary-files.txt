@@ -1,0 +1,21 @@
+# Required proprietary inputs: path | source | SHA-256 | consumer
+#
+# 路径约定：本设备仓库不含板级固件（format 1 的设备把固件放在 UEFI 仓库里），
+# 下列路径相对 UEFI 检出目录的 Platforms/SurfaceDuo1Pkg/Device/lg-flash/。
+#
+# 与 mh2lm 的区别：lg-flash 是 Project Aloha 上游现成目标，DTB 与厂商二进制
+# 已随树 vendored；本文件记录来源与待核对项，真机侧的 sha256 在 P0 采集后回填。
+#
+# 设备树：Aloha 树内自带（来自 stock 固件）。P0 时用真机 stock boot 镜像里的
+# DTB 与它交叉核对（/memory、reserved-memory、面板节点），不一致以真机为准。
+DeviceTreeBlob/Android/android-flash.dtb | Project Aloha lg-flash (from stock firmware) | TODO(P0: 与真机 stock DTB 交叉核对后回填) | boot image DTB; ADT cross-check
+#
+# 厂商二进制（按键/Qualcomm UEFI 驱动集等）：随 Aloha lg-flash 的 Binaries/ vendored，
+# 来源与完整性以该仓库为准；若菜单按键无响应，参照 mh2lm 的 ButtonsDxe 补丁路线处理。
+Binaries/** | Project Aloha lg-flash vendored binaries | 见 Aloha 仓库 | UEFI drivers required by the DSC/FDF
+#
+# 以下 Apple 产物不入库，构建/打包时在本地取得，并由 board.toml 的 sha256 校验：
+#   iOS 16.7.16 IPSW          Apple CDN（url 见 board.toml [ipsw]）
+#   kernelcache.release.iphone10b  IPSW 成员，pin 见 board.toml [ipsw.sha256]
+#   DeviceTree.d22ap.im4p          IPSW 成员，pin 见 board.toml [ipsw.sha256]
+#   scripts/base-d22ap.adt         由上面 DeviceTree 解出（scripts/adt.py unwrap），不入库
