@@ -1,0 +1,113 @@
+name: kernel-8796
+
+# 在 macOS runner 上用 Xcode 15 编出 xnu-8796 内核（UniXNU 构建路径）。
+#
+# 为什么放 macOS：iig（DriverKit 的接口生成器）的输出格式跟世代绑定。
+# 新 iig 会生成 IORPC.kernelContent，8796 没有这个字段；Xcode 15 的 iig 才是对的。
+# UniXNU-cepheus 的 8796 CI 也钉在 Xcode 15（iig 世代）。
+#
+# 产出：mach.development.bcm2837.unstripped（4 KiB 页，BCM2837）
+#   → 够冲 M3（内核入口 + 打印），但不是 iOS16 单体内核（M4 需要 16 KiB 单体内核，见 ci/README.md）。
+#
+# prelink 会故意失败：board.toml 没配 [kernel.prelink]，而且 16.7.16 的 kernelcache 是 142.1，
+# 与源码 141.3 不同修订（版本错配，见 ci/README.md）。内核二进制在 prelink 之前就已生成。
+
+on:
+  # push 到 main 也触发：首次推送即开始构建；之后改配置/补丁推送即重编。
+  # push 事件没有 inputs，env 里用 || 给默认值兜底。
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "并行 job 数（macos-14 标准 runner 是 3 核）"
+        default: "3"
+      unixnu_sha:
+        description: "UniXNU 提交（默认是 2026-10-28 验证过的 main）"
+        default: "40d21cc65171c3a24faa130a2a8e899f85790485"
+
+env:
+  # dSYM 对 payload 没用，关掉省一半时间和磁盘
+  MAKEFLAGS: "BUILD_DSYM=0"
+  UNIXNU_SHA: ${{ inputs.unixnu_sha || '40d21cc65171c3a24faa130a2a8e899f85790485' }}
+  JOBS: ${{ inputs.jobs || '3' }}
+
+jobs:
+  kernel:
+    runs-on: macos-14
+    timeout-minutes: 350
+    steps:
+      - name: Checkout device repository
+        uses: actions/checkout@v4
+        with:
+          path: UniXNU-flashlm
+
+      - name: Clone UniXNU (pinned)
+        run: |
+          git clone --filter=blob:none https://github.com/UniXNU/UniXNU.git unixnu
+          git -C unixnu checkout "$UNIXNU_SHA"
+          git -C unixnu log --oneline -1
+
+      - name: Apply the 8796 port (patches in this repository)
+        run: |
+          git -C unixnu apply "$GITHUB_WORKSPACE/UniXNU-flashlm/ci/0019-unixnu-8796-ci.patch"
+          git -C unixnu status --porcelain | head -20
+          grep -n 'xnu-8796' unixnu/feeds.toml
+
+      - name: Toolchain (oldest Xcode 15 - iig generation matters)
+        run: |
+          brew install cmake ninja unifdef
+          XC=$(ls -d /Applications/Xcode_15*.app 2>/dev/null | sort -V | head -1)
+          [ -n "$XC" ] || XC=$(ls -d /Applications/Xcode*.app | sort -V | head -1)
+          echo "picked: $XC"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcrun --find iig
+          python3 --version
+          df -h /
+
+      - name: Defconfig
+        working-directory: unixnu
+        run: python3 unixnu defconfig flashlm_defconfig -D ../UniXNU-flashlm
+
+      - name: Build kernel
+        working-directory: unixnu
+        env:
+          # prepare-xnu-source.py 用 GitHub API 列 DriverKit 头，匿名会 403
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          # 末尾的 prelink 必然失败（预期），内核二进制在那之前已经生成
+          python3 unixnu build kernel -D ../UniXNU-flashlm -j "$JOBS" 2>&1 | tee kernel.log || true
+          ls -l out/flashlm/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.* || true
+          # 8796 links mach.<config>.unstripped; the stripped mach.<config> is equally usable
+          test -f out/flashlm/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped \
+            || test -f out/flashlm/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837
+
+      - name: Failure summary
+        # 让失败信息出现在 job 摘要里：只下 artifact 看不到 Error 的时候很有用
+        if: always()
+        working-directory: unixnu
+        run: |
+          echo "=== build errors (first 15 per log) ==="
+          for f in kernel.log out/flashlm/logs/*.log out/flashlm/tree/build/libpthread-kernel/*.log; do
+            [ -f "$f" ] || continue
+            hits=$(grep -nE " error: |Error 1$|Error 2$|No such file|No rule to make target|Undefined symbols|undefined symbol|ld: " "$f" | head -15 || true)
+            if [ -n "$hits" ]; then echo "--- $f"; echo "$hits"; fi
+          done
+          echo "=== tail of the most recent log ==="
+          last=$(ls -t kernel.log out/flashlm/logs/*.log 2>/dev/null | head -1 || true)
+          [ -n "$last" ] && tail -40 "$last" || true
+
+      - name: Upload kernel and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-8796
+          if-no-files-found: warn
+          path: |
+            unixnu/out/flashlm/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.*
+            unixnu/kernel.log
+            unixnu/out/flashlm/logs/*.log
+            unixnu/out/flashlm/tree/build/libpthread-kernel/*.log
+            unixnu/out/flashlm/tree/build/libpthread-kernel/*.json
