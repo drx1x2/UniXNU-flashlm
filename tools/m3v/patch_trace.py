@@ -7,7 +7,8 @@ IN_KERNEL is the kernel the current image ships (the M3U kernel: pristine
 af7a0bf2... + M3E/M3F/M3N/M3S/... layers) or the pristine CI kernel. Every
 trace point below must still hold its pristine word (no earlier layer may
 have touched it) and the stubs go into the highest free NOP run of the
-A32 NOP-slide cave 0x...73DC600-0x...73DD000; the script refuses otherwise.
+first cave window (see CAVES) with a free 360-word NOP run; the script
+refuses otherwise.
 
 Each stub (24 words, only x16/x17 and NZCV clobbered -- dead at a call's
 return point and at the loop exits used here):
@@ -22,7 +23,16 @@ import struct, subprocess, sys, tempfile, os
 BASE = 0xFFFFFFF007004000          # file offset 0 <-> this VA (segment walk, kernel-milestone-prog.md)
 SIZE = 14_917_208
 PROG = 0xFFFFFFF007F14848
-CAVE_LO, CAVE_HI = 0xFFFFFFF0073DC600, 0xFFFFFFF0073DD000
+# Cave windows, tried in order. Both are linker padding inside __TEXT_EXEC,__text
+# (verified on the pristine CI kernel: pure NOP, no symbol, no branch/adr/adrp
+# target inside):
+#  1. the A32 NOP-slide cave the M3E/M3F/M3S layers already use;
+#  2. start.s `.align 12` padding after `__start` (0x...73E0488: b _start_first_cpu)
+#     up to `_LowExceptionVectorBase` (0x...73E1000) -- 733 words. One word is kept
+#     NOP at each end. NOT used: 0x...73E0004.. (inside the LowResetVectorBase page
+#     secondary CPUs enter) and 0x...73E1784.. (inside the exception vector table).
+CAVES = [(0xFFFFFFF0073DC600, 0xFFFFFFF0073DD000),
+         (0xFFFFFFF0073E048C, 0xFFFFFFF0073E1000)]
 NOP = 0xD503201F
 
 # (ID, VA, pristine word, meaning) -- pristine words read from
@@ -112,14 +122,19 @@ def main():
     for sid, va, w0, what in POINTS:
         if rd(va) != w0: sys.exit(f'point {sid:#x} {va:#x}: word {rd(va):#010x} != pristine {w0:#010x} (touched by an earlier layer?)')
     need = len(POINTS) * STUB_WORDS
-    best, va, run_end = None, CAVE_HI - 4, CAVE_HI      # highest NOP run that fits (plus a guard NOP below)
-    while va >= CAVE_LO:
-        if rd(va) != NOP: run_end = va
-        else:
-            start = (va + 4 + 7) & ~7                   # keep word va as the guard NOP
-            if start + need * 4 <= run_end: best = start; break
-        va -= 4
-    if best is None: sys.exit('no free NOP run in the cave')
+    best = None
+    for lo, hi in CAVES:                                    # highest fit, one guard NOP kept at each end
+        va, run_end = hi - 4, hi - 4
+        while va >= lo and best is None:
+            if rd(va) != NOP: run_end = va
+            else:
+                start = (va + 4 + 7) & ~7                   # word va stays NOP (low guard)
+                if start + need * 4 <= run_end:          # run_end starts at hi-4: top guard
+                    best = start
+            va -= 4
+        if best is not None: break
+        print(f'cave {lo:#x}..{hi:#x}: no free run of {need} words, trying next')
+    if best is None: sys.exit('no free NOP run in any cave')
     ledger = []
     for i, (sid, va, w0, what) in enumerate(POINTS):
         at = best + i * STUB_WORDS * 4

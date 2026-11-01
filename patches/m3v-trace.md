@@ -91,6 +91,14 @@ b 原址+4
 
 - 桩经 args 页内核 VA 写；P4 已证该 VA 在换根后可写。arm_vm_init 完成后若该映射
   属性变化导致写异常，M3E 黑匣子会复位——那本身也是读数（会表现为复位而非静默）。
-- `patch_trace.py` 要求插点仍是 pristine 字、洞内有连续 360 字 NOP；在现役 M3U 内核
-  上若不满足会拒绝并报原因，不会盲写。
+- `patch_trace.py` 要求插点仍是 pristine 字、洞内有连续 360 字 NOP，否则拒绝、不盲写。
+- **洞窗（2026-11-01 修订）**：现役 M3U 内核的 A32 洞已被 M3E/M3F/M3S 占满（最大空段
+  24 字），故加第二洞窗 `0x…73E048C..0x…73E1000`：start.s 在 `__start`（`b _start_first_cpu`）
+  之后、`_LowExceptionVectorBase` 之前的 `.align 12` 填充，733 字。pristine 核实：纯 NOP、
+  无符号、全核无 b/bl/adr/adrp 落点；同在 `__TEXT_EXEC,__text`（本核无 `__TEXT_BOOT_EXEC`，
+  不会被回收）。两端各留 1 个 NOP 守卫。唯一外部引用是 `ArmCpu::startCPU` 对
+  LowResetVectorBase 起 64 KiB 做 cache 清理（副核启动，P5 之后），对桩无影响。
+  **不用**：`0x…73E0004` 段（LowResetVectorBase 页，副核入口）与 `0x…73E1784` 段（异常向量表内）。
+  模拟「洞一占满」后桩落在 `0x…73E0A58..0x…73E0FF8`，375 字改动、逐点反汇编核对 PASS。
+- 不腾退 M3F 桩阵列：P5 判读与 idx1 依赖它；不去掉桩内 PROG 三写：idx1 显示最新 trace ID 靠它。
 - Unicorn 只能跑关 MMU 的降级路径；开 MMU 后的条带写由 Gate C 权限走查覆盖。
