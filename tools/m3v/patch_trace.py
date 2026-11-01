@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """M3V trace stubs for the xnu-8796.141.3 diagnostic kernel (DIAGNOSTIC ONLY).
 
-  python3 patch_trace.py IN_KERNEL OUT_KERNEL
+  python3 patch_trace.py IN_KERNEL OUT_KERNEL [--set p4p5|console]
 
 IN_KERNEL is the kernel the current image ships (the M3U kernel: pristine
 af7a0bf2... + M3E/M3F/M3N/M3S/... layers) or the pristine CI kernel. Every
@@ -37,7 +37,8 @@ NOP = 0xD503201F
 
 # (ID, VA, pristine word, meaning) -- pristine words read from
 # mach.development.bcm2837.unstripped of CI run 41150570344 (MD5 af7a0bf2...)
-POINTS = [
+SETS = {}
+SETS['p4p5'] = [
     (0x20, 0xFFFFFFF0073BB454, 0x7100041F, 'pmap_bootstrap: SecureDTGetProperty returned'),
     (0x21, 0xFFFFFFF0073BB4F4, 0xD0FFED55, 'pmap_bootstrap: pmap_data_bootstrap returned'),
     (0x22, 0xFFFFFFF0073BB57C, 0xD0FFED48, 'pmap_bootstrap: bzero returned'),
@@ -54,7 +55,25 @@ POINTS = [
     (0x2D, 0xFFFFFFF0079A1A94, 0xB00009E8, 'arm_init: switch_to_serial_console returned'),
     (0x2E, 0xFFFFFFF0079A1AA4, 0x52800000, 'arm_init: PE_create_console returned'),
 ]
+SETS['console'] = [   # M3V2 (2026-11-01): p4p5 readout ended at 0x2C, so the endpoint is
+    # PE_create_console (0x2D is skipped on the non-serial path; switch_to_serial_console is a
+    # 5-insn setter). IDs reuse the 0x20.. palette -- apply ONE set per image, never both.
+    (0x20, 0xFFFFFFF00793CBE8, 0xB0000D35, 'PE_create_console: ml_io_map_wcomb(PA 0x3C0FC000) returned'),
+    (0x21, 0xFFFFFFF00793CC10, 0x528A4869, 'PE_create_console: 1st read of the 0x3C0FC000 mapping returned'),
+    (0x22, 0xFFFFFFF00793CC48, 0xF947BEA0, 'PE_create_console: printf (FUNK branch) returned'),
+    (0x23, 0xFFFFFFF00793CC58, 0x90FFC5C0, 'PE_create_console: bzero done / magic-match join'),
+    (0x24, 0xFFFFFFF0073AFF94, 0xD103C3FF, 'initialize_screen: entry'),
+    (0x25, 0xFFFFFFF0073B018C, 0xAA0003F5, 'initialize_screen: ml_io_map_unmappable returned'),
+    (0x26, 0xFFFFFFF0073B01B4, 0xAD4307E0, 'initialize_screen: lck_spin_lock returned'),
+    (0x27, 0xFFFFFFF0073B0380, 0x52800028, 'initialize_screen: lck_ticket_init returned'),
+    (0x28, 0xFFFFFFF0073B0540, 0xF85A83A8, 'initialize_screen: vc_progress_set returned (1st site)'),
+    (0x29, 0xFFFFFFF0073B05F4, 0x397822A8, 'initialize_screen: gc_enable returned'),
+    (0x2A, 0xFFFFFFF0073B06C4, 0xF85A83A8, 'initialize_screen: thread_call_enter_delayed returned'),
+    (0x2B, 0xFFFFFFF0073B07BC, 0x52000260, 'initialize_screen: vc_progress_set returned (2nd site)'),
+    (0x2C, 0xFFFFFFF0073B087C, 0xD65F03C0, 'initialize_screen: final ret reached'),
+]
 STUB_WORDS = 24
+POINTS = SETS['p4p5']
 
 def off(va): return va - BASE
 def movz(d, imm, hw): return 0xD2800000 | hw << 21 | imm << 5 | d
@@ -115,7 +134,15 @@ def stub(sid, entry, word, at):
     return w
 
 def main():
-    src, dst = sys.argv[1], sys.argv[2]
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('src'); ap.add_argument('dst')
+    ap.add_argument('--set', default='p4p5', choices=sorted(SETS))
+    a = ap.parse_args()
+    src, dst = a.src, a.dst
+    global POINTS
+    POINTS = SETS[a.set]
+    print(f'point set: {a.set} ({len(POINTS)} points)')
     k = bytearray(open(src, 'rb').read())
     if len(k) != SIZE: sys.exit(f'size {len(k)} != {SIZE}')
     rd = lambda va: struct.unpack_from('<I', k, off(va))[0]

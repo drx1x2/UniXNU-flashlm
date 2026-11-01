@@ -102,3 +102,54 @@ b 原址+4
   模拟「洞一占满」后桩落在 `0x…73E0A58..0x…73E0FF8`，375 字改动、逐点反汇编核对 PASS。
 - 不腾退 M3F 桩阵列：P5 判读与 idx1 依赖它；不去掉桩内 PROG 三写：idx1 显示最新 trace ID 靠它。
 - Unicorn 只能跑关 MMU 的降级路径；开 MMU 后的条带写由 Gate C 权限走查覆盖。
+
+## 真机读数 #1（2026-11-01，p4p5 点集）
+
+用户逐格测像素：第一行 1–12 格红→玫红全亮，第 13 格 (255,246,255) = **0x2C 白**；
+第 14/15 格暗值互等 = 未命中暗灰（不是 0x2D 命中灰 808080）；第二行全空。
+row-3 idx1 显白 = 最新 PROG ID 0x2C（v3.5.2 旧色表外 → 白），两通道互证。
+
+**判读**：0x20–0x2C 全部按序命中，没有重复格 → pmap_bootstrap、arm_vm_init 全尾段、
+serial_init、kernel_startup_initialize_upto、kprintf、kern_feature_override 全都过了。
+0x2D 未命中**不说明死在 switch_to_serial_console**：`0x…79A1A74..1A80` 三个条件分支在
+非串口路径上直接跳到 `0x…79A1AA0`（`bl _PE_create_console`），而 switch_to_serial_console
+本身是 5 条指令的赋值函数。0x2E（PE_create_console 返回）未命中 ⇒
+**终点 = PE_create_console 内部（含它尾调的 initialize_screen）**。
+
+**头号嫌疑**：PE_create_console 第一件事是 `ml_io_map_wcomb(0x3C0FC000, 0x4000)` 并立刻
+`ldr w8, [x0]` 比对魔数（'CRTB'/'CMHS'/'KNUF'），不匹配再 bzero 整 16 KiB。0x3C0FC000 是
+bcm2837（RPi3，RAM 0–1 GiB）上靠近 RAM 顶的物理地址；在 SM8150 上它不是 DRAM（DRAM
+从 0x80000000 起），落在无主外设空间——高通 NoC 对无主访问常见表现是总线挂死或
+异步 SError（早期 DAIF.A 屏蔽 ⇒ 静默）。与「静默停住、无复位」吻合。未证实，下一刷验证。
+
+## M3V2：console 点集（`patch_trace.py --set console`）
+
+ID 复用 0x20 起的调色板（监控/DarwinBoot 不变，只换内核）；**一个镜像只打一个点集**，
+打在现役 M3U 内核上（不是叠在 p4p5 trace 内核上）。13 点 × 24 字 = 325 字改动，模拟
+「洞一占满」时落在第二洞窗 `0x…73E0B18..0x…73E0FF8`，逐点反汇编核对 PASS；每点之后
+直到下一个置标志指令/分支前，无 NZCV 读、无 x16/x17 读（脚本化核对）。
+
+| ID | 色 | VA | 含义 |
+| --- | --- | --- | --- |
+| 0x20 | 红 | 0x…793CBE8 | ml_io_map_wcomb(0x3C0FC000) 返回（只建映射） |
+| 0x21 | 橙 | 0x…793CC10 | **第一次读 0x3C0FC000 返回** |
+| 0x22 | 黄 | 0x…793CC48 | 'KNUF' 分支的 printf 返回（多半不走） |
+| 0x23 | 黄绿 | 0x…793CC58 | bzero 完成 / 魔数匹配汇合，将尾调 initialize_screen |
+| 0x24 | 绿 | 0x…73AFF94 | initialize_screen 入口 |
+| 0x25 | 春绿 | 0x…73B018C | ml_io_map_unmappable 返回 |
+| 0x26 | 青 | 0x…73B01B4 | lck_spin_lock 返回 |
+| 0x27 | 天蓝 | 0x…73B0380 | lck_ticket_init 返回 |
+| 0x28 | 蓝 | 0x…73B0540 | vc_progress_set 返回（第 1 处） |
+| 0x29 | 紫 | 0x…73B05F4 | gc_enable 返回 |
+| 0x2A | 品红 | 0x…73B06C4 | thread_call_enter_delayed 返回 |
+| 0x2B | 玫红 | 0x…73B07BC | vc_progress_set 返回（第 2 处） |
+| 0x2C | 白 | 0x…73B087C | initialize_screen 走到最终 ret |
+
+initialize_screen 内分支多（按 op 走不同路径），中间点不全命中是正常的；看**最后一个命中格**。
+
+| 条带 | 结论 / 下一步 |
+| --- | --- |
+| 只有红 | 死在第一次读 0x3C0FC000 ⇒ 证实嫌疑；修法：把该 PA 改指 DRAM 内一块保留区（或跳过 panic-log 魔数段），需选定安全 PA |
+| 红 橙 停 | 死在 bzero 0x3C0FC000（写侧）⇒ 同上 |
+| 走到黄绿/绿之后 | panic-log 段无辜；终点在 initialize_screen，按最后命中格缩小 |
+| 白（0x2C）也亮 | initialize_screen 返回了 ⇒ 与读数 #1 矛盾，先复核 |
