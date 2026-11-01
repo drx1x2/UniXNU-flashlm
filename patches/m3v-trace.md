@@ -321,3 +321,19 @@ M3Z4 `tools/m3v/uuid_skip.py`：0x...78D2DFC `b.ne`（0x54000941）→ `b`（0x1
 预期：越过 P10。风险：`g_crypto_funcs` 在内核中有 166 处引用（cpx AES、mptcp/ipsec HMAC、in6_cga 等），
 后续任一被调用都会以同一形态（FAR 为小偏移、ELR 在 cc*/sha*/aes* 包装里）再死；届时根治是让 corecrypto
 注册（M3 侧：内核内建表 + 调 register_crypto_functions；M4 的 iOS kernelcache 预链接 corecrypto kext，应不受影响——待验证）。
+
+## M3Z4 读数与 M3Z5（corecrypto 表注册）
+
+M3Z4 真机：越过 UUID；ESR 0x96000005、FAR 0x150、ELR 0x...786xxxx。按 xnu-8796.101.5 register_crypto.h，
++0x150 = `random_kmem_ctx_size_fn`，调用链 `kmem_crypto_init → crypto_random_kmem_ctx_size`（0x...786BFAC）。
+
+M3Z5 `tools/m3v/crypto_reg.py`（源 crypto_reg.S）：initialize_screen 的 ret（0x...73B087C，P2 两次均先于 P9；
+第二次注册返回 -1 无害）→ 0x...73E0500 桩调 `register_crypto_functions(&table)`。表 56 槽：
+0x140 random_generate = cntpct 播种 xorshift64（**非安全随机**），0x148 uniform = cntpct % bound，
+0x150 kmem_ctx_size = 256，0x158 kmem_init = 0；其余每槽独立陷阱：写 M3E 面包屑 CODE = 槽偏移、
+ESR = 0xC0DE0000|槽、ELR = 调用者 x30、FAR = x0，再进 halt 尾停住 ⇒ v3.7 第 5 行直接报出下一个缺的槽
+（对表：0x00–0x18 ccdigest_*，0x28 sha1_di，0x48–0x60 cchmac_*，0x160–0x1B8 digest/hmac 新接口）。
+Unicorn 实跑：g_crypto_funcs = 0x...73E0780，四个活槽返回值正确，陷阱槽 0x28 记录 CODE 0x28 / ESR c0de0028 / 双 magic 后停在尾。
+
+配方：M3U → fix_console_pa → halt_tail → uuid_skip → crypto_reg，固件 v3.7。与 canary/panic_rec/trace console 互斥。
+下一步若陷阱报 digest/hmac 槽：内核自带 ccdigest_init/update、ccsha1_di、ccsha256_di、cchmac*，可逐槽接真实现。
