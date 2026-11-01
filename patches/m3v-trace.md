@@ -216,3 +216,26 @@ panic_rec 占 cave 2 低端，patch_trace 从高端分配，不冲突；输入�
 
 **先看现有读数**：若当前循环的菜单帧第 3–4 行已经有 `EXC` 行（CODE 0/3/4/7/C4–C6），说明是
 M3E 记录的异常复位，不必刷 M3X，直接按 ELR/FAR 判读。
+
+## 无记录复位路径排查（2026-11-01，主机侧静态）
+
+现役内核全核只有 6 处 `smc #0`、1 处 `hvc #0`：
+- `ArmCpu::startCPU`（0x…795FDC4 smc / 0x…795FDCC hvc）：PSCI CPU_ON 0xC4000003，非复位。
+- `ArmDTPlatform::configure` 里 **5 处直接 PSCI SYSTEM_RESET**（0x84000009），不经 `_panic`、不进异常向量，
+  M3E/M3X 都钩不到，均由 boot-args 控制（`[sp,#0xc]`/`[sp,#0x8]` 先清零，未设置时不触发）：
+
+| smc VA | 触发条件 | 位置 |
+| --- | --- | --- |
+| 0x…795D96C | `sheng-platform-stage=1` | hasNVRAMProxy 通过后 |
+| 0x…795D9F0 | `sheng-platform-stage=2` | 下一步检查后 |
+| 0x…795DBD4 | `sheng-platform-stage=3` | createDeviceNubs 成功后 |
+| 0x…795DC60 | `sheng-platform-panic≠0` 或 `stage=4` | 发布前 |
+| 0x…795DC40 | `sheng-platform-stage=5` | vtable+0x2A0 调用后 |
+
+即上游 UniXNU 的「阶段到达即复位」二分开关。若 DarwinBoot/菜单传的 boot-args 含 `sheng-platform-*`，
+快速无记录复位 = 内核已到 IOKit 平台 configure（大进展），而不是死亡。其余无记录类：未钩向量槽
+（1/2/5/6 IRQ/FIQ、8–15 低 EL）；EL3/TZ 侧复位（XPU 违规等，非安全世界看不到）。
+
+(b) 读回通道：M3F 的 PROG 由内核按可缓存映射写、无 `dc civac`；M3J 只证明了**固件写**的 DRAM 跨温复位存活。
+本轮 monitor 相干读到 P2（idx1 紫）而读回报 `PROG NONE` ⇒ 至少 PROG 这条「内核写→温复位→固件读」链未通，
+优先怀疑脏行随复位丢失（M3E 记录器同样只有 dsb）。判别：在已确认到达的点放一个「写面包屑 + dc civac + PSCI 复位」金丝雀。
