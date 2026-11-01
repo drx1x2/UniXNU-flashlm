@@ -354,3 +354,12 @@ M3Z7 = crypto_reg.py 增补（不再调用 register_and_init_prng，避开早期
 reg 桩注册 crypto 表后直接写 funcs（generate→xorshift，其余 no-op 返回 0）、ctx=&table、initialized=1。
 表移至 0x...73E07D0（代码 0x2D0 B，共 1168 B）。Unicorn：真实 read_random(buf,300) 跨 256 分块正确填充且不越界，random_cpu_init(1) 返回。
 **全部随机数为非安全占位，仅用于诊断推进。** 配方不变：… → uuid_skip → crypto_reg → lr_rec（v3.7 第 4/5 行仍为 LR）。
+
+## M3Z7 读数与 M3Z8（panic 同轮截停）
+
+M3Z7 真机：所有旧死点一闪而过，然后秒级复位，M3E 没有记录；sheng 复位点未武装，M3E 尾仍停住 ⇒ 是新的复位路径。
+首要嫌疑是真 panic 走了原厂路径：M3U 系没有 M3D，panic 的终点就是复位。
+M3Z8 `tools/m3v/panic_halt.py`（源 panic_halt.S，23 字 @0x...73E0A00）：`_panic_trap_to_debugger` 入口（0x...726AC2C，panic/Assert/panic_with_options 共用）
+→ 写 M3E 面包屑：CODE 0x50、ESR=x2(reason)、ELR=x6(panic 调用者)、FAR=x0(格式串 VA)，然后 wfe 死循环，不复位。
+Unicorn：经 _panic 进入，面包屑字段正确，停在循环。配方 … → crypto_reg → lr_rec → panic_halt，固件 v3.7。
+判读：CODE 50 ⇒ panic，按 FAR 查格式串、按 ELR 查调用者；如果仍然秒复位且没有记录 ⇒ 排除 panic，转向非 panic 复位源（PEHaltRestart / PSCI 直呼，或者记录器之外的异常）。
