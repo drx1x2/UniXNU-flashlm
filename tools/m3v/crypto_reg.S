@@ -5,7 +5,7 @@ mov x29, sp
 adr x0, table
 bl .
 ldp x29, x30, [sp], #16
-ret
+b psetup
 ctxsz:
 mov x0, #256
 ret
@@ -169,6 +169,26 @@ sub x8, x8, #1
 str x8, [x3]
 dsb sy
 b .
+// M3Z7: no corecrypto kext => cckprng funcs (prng @ 0x...7164460) never registered;
+// read_random blr'd NULL refresh (LR 0x...73B63A8). Install no-op funcs + xorshift generate.
+psetup:
+adr x9, kinit
+adr x10, pgen
+ldr x11, =0xFFFFFFF007164468
+stp x9, x9, [x11]
+stp x9, x9, [x11, #0x10]
+stp x10, x9, [x11, #0x20]
+ldr x12, =0xFFFFFFF007B082B0
+adr x13, table
+str x13, [x12]
+mov w14, #1
+str w14, [x11, #-8]
+dmb ish
+ret
+pgen:
+mov x1, x3
+b rgen
+.ltorg
 .balign 8
 table:
 .skip 448

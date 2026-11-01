@@ -344,3 +344,13 @@ M3Z5 真机：ESR 0x86000005（EC 0x21 取指中止，L1 翻译故障），ELR 0
 （否则 ESR 为 c0de00xx）⇒ random_kmem 已越过，新死点是**经 NULL 函数指针的调用/跳转**。ELR/FAR 无信息，调用者只在 x30。
 M3Z6 `tools/m3v/lr_rec.py`：把 M3E 记录器 0x...73DC6C0 的 `str x2,[x3,#0x18]`（FAR）改为 `str x30,[x3,#0x18]`（f9000c7e），
 v3.7 第 4/5 行改读 LR（lo/hi）。配方：…→ crypto_reg → lr_rec，固件 v3.7 不变。LR−4 即 blr 处（若为 br 尾调用则 LR 是上一层返回点）。
+
+## M3Z6 读数与 M3Z7（cckprng 函数表）
+
+M3Z6 真机：LR = 0x...73B63A8 ⇒ blr @0x...73B63A4 在 `read_random`：`blr [prng+0x20]`（0x...7164480，cckprng refresh）为 NULL。
+prng 全局 @0x...7164460：+0 initialized，+8..+0x30 = cckprng_funcs{init, initgen, reseed, refresh, generate(ctx,cpu,n,out), init_with_getentropy}，
+ctx 指针 @0x...7B082B0；正常由 corecrypto kext 调 register_and_init_prng 填（M3 无此 kext）。
+M3Z7 = crypto_reg.py 增补（不再调用 register_and_init_prng，避开早期 entropy_init 的 lck_mtx_init）：
+reg 桩注册 crypto 表后直接写 funcs（generate→xorshift，其余 no-op 返回 0）、ctx=&table、initialized=1。
+表移至 0x...73E07D0（代码 0x2D0 B，共 1168 B）。Unicorn：真实 read_random(buf,300) 跨 256 分块正确填充且不越界，random_cpu_init(1) 返回。
+**全部随机数为非安全占位，仅用于诊断推进。** 配方不变：… → uuid_skip → crypto_reg → lr_rec（v3.7 第 4/5 行仍为 LR）。
