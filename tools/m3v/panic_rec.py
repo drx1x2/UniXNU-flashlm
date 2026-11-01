@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """M3X: record the panic caller before the M3D panic->PSCI reset (DIAGNOSTIC ONLY).
 
-  python3 panic_rec.py IN_KERNEL OUT_KERNEL      # IN = a kernel carrying M3D (e.g. current M3U)
+  python3 panic_rec.py IN_KERNEL OUT_KERNEL                  # IN already carries M3D
+  python3 panic_rec.py IN_KERNEL OUT_KERNEL --install-m3d    # IN has pristine _panic (current M3U):
+                                                             # also lay the 4-word M3D PSCI tail
+NOTE (2026-11-01): the current M3U lineage dropped M3D at M3F; use --install-m3d there.
 
 M3D turned `_panic` entry into `b 0x...73E1010` (PSCI SYSTEM_RESET tail), so a panic
 reboots with no trace. M3W moved the death past PE_init_printf and the device now
@@ -25,6 +28,7 @@ against a disassembly of the patched file by the caller.
 import struct, sys
 BASE, SIZE, NOP = 0xFFFFFFF007004000, 14_917_208, 0xD503201F
 PANIC = 0xFFFFFFF00796F3B4
+PROLOGUE = 0xD10083FF                           # sub sp, sp, #0x20 (pristine _panic)
 M3D_BR, NEW_BR = 0x17E9C717, 0x17E9C453           # b 0x...73E1010 -> b 0x...73E0500
 TAIL = (0xFFFFFFF0073E1010, [0x52800120, 0x72B08000, 0xD4000003, 0x14000000])
 REC_VA = 0xFFFFFFF0073E0500
@@ -41,8 +45,14 @@ def main():
     k = bytearray(open(sys.argv[1], 'rb').read())
     if len(k) != SIZE: sys.exit(f'size {len(k)} != {SIZE}')
     rd = lambda va: struct.unpack_from('<I', k, va - BASE)[0]
+    install = '--install-m3d' in sys.argv[3:]
     if rd(PANIC) == NEW_BR: sys.exit('already patched')
-    if rd(PANIC) != M3D_BR: sys.exit(f'_panic entry {rd(PANIC):#010x}: input lacks M3D (want {M3D_BR:#010x})')
+    if install:
+        if rd(PANIC) != PROLOGUE: sys.exit(f'_panic entry {rd(PANIC):#010x} != pristine {PROLOGUE:#010x}')
+        if any(rd(TAIL[0] + 4 * i) != NOP for i in range(4)): sys.exit('M3D tail site not NOP')
+        for i, w in enumerate(TAIL[1]): struct.pack_into('<I', k, TAIL[0] - BASE + 4 * i, w)
+    elif rd(PANIC) != M3D_BR:
+        sys.exit(f'_panic entry {rd(PANIC):#010x}: input lacks M3D (want {M3D_BR:#010x}); pass --install-m3d')
     for i, w in enumerate(TAIL[1]):
         if rd(TAIL[0] + 4 * i) != w: sys.exit(f'M3D tail word {i} mismatch')
     for va in range(REC_VA - 4, REC_VA + 4 * len(REC) + 4, 4):    # one guard NOP each side
@@ -50,7 +60,8 @@ def main():
     for i, w in enumerate(REC): struct.pack_into('<I', k, REC_VA - BASE + 4 * i, w)
     struct.pack_into('<I', k, PANIC - BASE, NEW_BR)
     open(sys.argv[2], 'wb').write(k)
-    print(f'_panic -> recorder {REC_VA:#x}..{REC_VA + 4 * len(REC):#x} ({len(REC)} words) -> M3D tail; 29 words changed')
+    print(f'_panic -> recorder {REC_VA:#x}..{REC_VA + 4 * len(REC):#x} ({len(REC)} words) -> M3D tail; '
+          f'{29 + 4 * install} words changed' + (' (M3D tail installed)' if install else ''))
 
 if __name__ == '__main__':
     main()

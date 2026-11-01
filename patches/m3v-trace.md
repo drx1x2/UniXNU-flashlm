@@ -189,7 +189,10 @@ initialize_screen 内分支多（按 op 走不同路径），中间点不全命�
 
 条带红→橙→黄绿→绿→春绿→蓝→白；row-3 idx1 紫 (168,28,244) = P2 第二次调用（P5 先亮后被覆盖）。
 ⇒ **M3W 修复真机生效**，PE_create_console / initialize_screen / PE_init_printf 全过；M3 原始冻结治愈。
-设备「一闪而过、自动重启」并回到菜单：后续某处 panic 触发了 M3D 的 panic→PSCI 改道（首次真正触发）。
+设备「一闪而过、自动重启」并回到菜单。**更正（同日构建侧机检）**：现役内核不含 M3D（M3F 重建诊断栈时
+未带入，_panic 为原版序言 0xd10083ff，0x…73E1010 全 NOP），所以复位不是 panic 改道。仍在役的复位源：
+M3E 异常记录器 + PSCI 尾（0x…73DC710–71C）——快速复位首选此解释，面包屑应已写下；若配方含 M3K，
+挂死（含纯 panic 自旋）约 29 s 后看门狗 bite 也会复位。用循环菜单帧第 3–4 行（EXC）和复位间隔区分。
 新终点：P2 第二次之后、P9 之前（machine_startup / bootstrap 区段）。
 
 ## M3X：panic 现场记录（`tools/m3v/panic_rec.py`）
@@ -206,7 +209,9 @@ DiagDraw 第 3–4 行：
 与 M3E 记录器差别：不读系统寄存器；复位前对两条面包屑缓存行 `dc civac` 到 PoC，防温复位丢行。
 29 字改动；`as` 汇编、补丁后反汇编核对（_panic → 0x…73E0500，尾跳 0x…73E1010）。
 
-叠加顺序（模拟通过，共 355 字）：现役 M3U → `fix_console_pa.py` → `panic_rec.py` → `patch_trace.py --set console`。
+叠加顺序：现役 M3U → `fix_console_pa.py` → `panic_rec.py --install-m3d` → `patch_trace.py --set console`
+（现役无 M3D，`--install-m3d` 同时铺 M3D 的 4 字 PSCI 尾；分支字与记录器改的是同一字，总账 359 字，模拟通过；
+产物与「先装历史 M3D 再跑 panic_rec」逐字节相同）。已含 M3D 的输入不带该参数（355 字）。
 panic_rec 占 cave 2 低端，patch_trace 从高端分配，不冲突；输入不含 M3D 时脚本拒绝。
 
 **先看现有读数**：若当前循环的菜单帧第 3–4 行已经有 `EXC` 行（CODE 0/3/4/7/C4–C6），说明是
