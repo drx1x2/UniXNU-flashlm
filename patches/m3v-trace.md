@@ -278,3 +278,29 @@ M3X/M3Z 依赖跨轮读回是我方失误；3273151 的 readback-hold 补丁无�
 |---|---|
 | 不再复位，停在色带 | 复位来自内核自身 M3E 异常尾：P2#2..P9 之间有异常；下一步同轮给异常上色（ESR EC/ELR 低位编码进色带） |
 | 仍在数秒内复位 | 复位不经内核武装路径：EL3/XPU/看门狗类外部复位；查 M3K 看门狗是否在位（应为 ~29 s）及 XPU 违例 |
+
+## M3Z2 真机（2026-11-01）：秒级复位消失 ⇒ 内核异常经 M3E 尾；idx1 天蓝 (201,255,252) = P10
+
+死点在 IOPlatformExpertDevice::init（P9 PE_init_iokit 之后），即 generatePlatformUUID 所在类。_panic 未被调用。
+停住期间本轮 args 页 +0x800 的 M3E 面包屑仍在 ⇒ 同轮读出。
+
+## M3Z3：监控 v3.7 同轮 EXC 读出（tools/m3v/monitor37.S，1872 B）
+
+v3.6 + 每轮询检查 args+0x800 MAGIC1 / +0x840 MAGIC2，双匹配则在 y=2380 起画 6 行×32 位格（MSB 在左，
+格 32×40 px、间距 40 px、每 4 位多 8 px；行距 50 px）：
+
+| 行 | 内容 |
+|---|---|
+| 0 | ESR[31:0] |
+| 1 | ELR[31:0] |
+| 2 | ELR[63:32]（内核应为 fffffff0） |
+| 3 | FAR[31:0] |
+| 4 | FAR[63:32] |
+| 5 | CODE[31:0]（M3E 向量槽号） |
+
+颜色：1 = 白（偶数半字节）/黄（奇数半字节）；0 = 深灰 0x20 / 灰 0x50 交替。无记录则该区不画。
+门禁 `gate37.py` A–E 全 PASS（E：有效/MAGIC2 坏/无记录三场景逐格比色、无越界）。
+补丁 blob 已用 `swap_blob.py monitor37.bin` 换入 `darwinboot-cpuon-monitor.patch`（首 hunk +23 行）。
+
+配方：固件 = 更新后的 cpuon-monitor 补丁重建 DarwinBoot；内核 = M3U → fix_console_pa.py → halt_tail.py（不变）。
+拿到照片后按行读 32 位转十六进制；ELR 用 nm.txt/all.s 落函数，ESR EC 判类型。
