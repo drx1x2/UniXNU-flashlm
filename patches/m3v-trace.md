@@ -304,3 +304,20 @@ v3.6 + 每轮询检查 args+0x800 MAGIC1 / +0x840 MAGIC2，双匹配则在 y=238
 
 配方：固件 = 更新后的 cpuon-monitor 补丁重建 DarwinBoot；内核 = M3U → fix_console_pa.py → halt_tail.py（不变）。
 拿到照片后按行读 32 位转十六进制；ELR 用 nm.txt/all.s 落函数，ESR EC 判类型。
+
+## M3Z3 读数（2026-11-01）与 M3Z4
+
+ESR 0x96000005（EL1 数据中止，读，L1 翻译故障），ELR 0xFFFFFFF00786AA40，FAR 0x28，CODE 0。
+未剥离反汇编：ELR = `_sha1_init+0x34`：`ldr x20, [x22, #0x28]`，x22 = `g_crypto_funcs`（0xFFFFFFF0071AF598）= NULL。
+不是设备树查找失败：调用者 `IOPlatformExpertDevice::generatePlatformUUID` 已经成功取到 `/chosen` 的
+`unique-chip-id`（8 B）与 `chip-id`（4 B），于是走 SHA-1（v5 UUID）分支；而内核里没有任何代码调
+`register_crypto_functions`——它的调用者是 com.apple.kec.corecrypto kext，M3 诊断内核不加载 kext，
+故 corecrypto 函数表为空，+0x28（sha1 项）取空。ADT 是对的（M4 的 IOPlatformUUID 需要它们），不改。
+
+M3Z4 `tools/m3v/uuid_skip.py`：0x...78D2DFC `b.ne`（0x54000941）→ `b`（0x1400004A），恒走「无 chip id」出口
+（x21=0、释放 /chosen、不设 IOPlatformUUID），1 字。配方：M3U → fix_console_pa → halt_tail → uuid_skip，
+固件沿 v3.7（保留同轮 EXC 读出）。
+
+预期：越过 P10。风险：`g_crypto_funcs` 在内核中有 166 处引用（cpx AES、mptcp/ipsec HMAC、in6_cga 等），
+后续任一被调用都会以同一形态（FAR 为小偏移、ELR 在 cc*/sha*/aes* 包装里）再死；届时根治是让 corecrypto
+注册（M3 侧：内核内建表 + 调 register_crypto_functions；M4 的 iOS kernelcache 预链接 corecrypto kext，应不受影响——待验证）。
