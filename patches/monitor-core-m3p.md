@@ -958,3 +958,11 @@ Pre-registered reading of row 3 in the freeze phase:
 - idx4 magenta → MAIR/TCR/TTBR0/TLBI step; white → table build;
   **purple** → `AllocatePages` failed (no launch); idx4 untouched →
   CPU_ON never reached the blob (compare row-11 `CPUON` text).
+
+
+## M3U2 真机结果（2026-11-01）
+
+v3.5.2 一刷：idx4 明绿（S4）、idx0 A 相心跳、idx2 绿、idx3 黑、一二排 10/10 ⇒
+隐式 PXN 根因确认，开缓存相干读侧成立。idx1 金色 (252,213,17)，G/R 0.845（同帧 L4
+柠檬黄 1.000）⇒ 精确终点 P4（`_pmap_bootstrap`）。死点区间：P4 之后、P5
+（`PE_init_printf` 返回）之前。M3Q3 的 P5 读数为淘汰假象。
