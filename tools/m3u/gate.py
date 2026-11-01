@@ -36,6 +36,10 @@ def gate_a():
     s = p.index('mM3PMonitorBlob[] = {'); e = p.index('};', s)
     b = bytes(int(x, 16) for x in re.findall(r'0x([0-9a-f]{2})', p[s:e]))
     ok = b == open(os.path.join(HERE, 'monitor352.bin'), 'rb').read()
+    v36 = os.path.join(HERE, '../m3v/monitor36.bin')
+    if not ok and os.path.exists(v36) and b == open(v36, 'rb').read():
+        print(f'Gate A  patch now carries v3.6 ({len(b)} B): superseded, see tools/m3v/gate36.py')
+        return True
     print(f'Gate A  patch blob == monitor352.bin: {"PASS" if ok else "FAIL"} ({len(b)} B)')
     return ok
 
