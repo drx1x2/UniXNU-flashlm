@@ -261,17 +261,20 @@ args VA 0xFFFFFFF007F14800（CODE 0xEE、ESR 0xC0FFEE01/00、ELR=0x…73B087C、
 
 设备行为：每轮在 initialize_screen 返回时立即复位（数秒内回菜单），属预期。
 
-## 金丝雀 C 读数（2026-11-01）：第 3–4 行空
+## 金丝雀 C 读数（2026-11-01）：第 3–4 行空、PRB 恒 NO ⇒ 跨轮通道死（与 M3L 一致）
 
-写侧已到可验证极致（哨兵、契约、提交字最后、两行 civac、PSCI 尾确实执行）。**但先排除观测时机**：
-crumb/PROG/PRB 读回块在 `Boot()` 里、菜单倒计时**之后**、交接前才画（不是菜单帧），并且画完立即
-`ZeroMem` 消费记录。M3E 年代内核在交接后冻结、不碰帧缓冲，这几行一直留在屏上可拍；M3W 之后内核会跑到
-initialize_screen 重绘帧缓冲（金丝雀就在其返回点复位），读回行只存在于交接前的一瞬——菜单帧上本来就不会有，
-错过那一瞬记录也已被清掉。所以「C 空」目前还不能区分「通道坏」和「没拍到」。
+写侧已到可验证极致（哨兵、契约、提交字最后、两行 civac、PSCI 尾确实执行），次轮仍空；PRB（固件同公式
+自写自读）从未 OK。这与既有裁决完全一致：M3K PSCI 自测试 ARMED 循环、M3L `CPY NO NO`（BootShim 在镜像入口、
+早于全部 UEFI 拷出的探针也空）——跨轮 DRAM 在本机死于复位本身或 ABL 早期初始化（m3m-flow.md 已关闭此线）。
+M3X/M3Z 依赖跨轮读回是我方失误；3273151 的 readback-hold 补丁无意义，已删。
 
-判别与修补：
-1. 第 6 行 PRB（固件写探针，同公式同地址）：`PRB OK` ⇒ 地址/落点跨启动一致、温复位不清此页，通道固件侧是好的；
-   `PRB NO` ⇒ 读回地址或 XBL/ABL 清内存，通道坏。
-2. `patches/darwinboot-readback-hold.patch`（叠在 crumb-readback 之后）：读回块后在第 12 行画 `HOLD 10S` 并
-   `gBS->Stall` 10 s，再 ZeroMem/交接——保证第 2–6 行可拍。合成底稿 `git apply --check` 通过。
-   内核不变，沿用金丝雀 C 内核即可。
+此后只用**同轮**通道（M3V 监控色带）。下一步 M3Z2 `tools/m3v/halt_tail.py`：把现役 M3E PSCI 尾首字
+`mov w0,#9` 改 `b .`（1 字），M3E 记录器（审计后内核唯一武装的复位路径）改为原地停住，色带留屏。
+
+    python3 tools/m3v/fix_console_pa.py M3U_KERNEL M3W_KERNEL
+    python3 tools/m3v/halt_tail.py M3W_KERNEL HALT_KERNEL
+
+| 现象 | 裁决 |
+|---|---|
+| 不再复位，停在色带 | 复位来自内核自身 M3E 异常尾：P2#2..P9 之间有异常；下一步同轮给异常上色（ESR EC/ELR 低位编码进色带） |
+| 仍在数秒内复位 | 复位不经内核武装路径：EL3/XPU/看门狗类外部复位；查 M3K 看门狗是否在位（应为 ~29 s）及 XPU 违例 |
