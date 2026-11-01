@@ -239,3 +239,24 @@ M3E 记录的异常复位，不必刷 M3X，直接按 ELR/FAR 判读。
 (b) 读回通道：M3F 的 PROG 由内核按可缓存映射写、无 `dc civac`；M3J 只证明了**固件写**的 DRAM 跨温复位存活。
 本轮 monitor 相干读到 P2（idx1 紫）而读回报 `PROG NONE` ⇒ 至少 PROG 这条「内核写→温复位→固件读」链未通，
 优先怀疑脏行随复位丢失（M3E 记录器同样只有 dsb）。判别：在已确认到达的点放一个「写面包屑 + dc civac + PSCI 复位」金丝雀。
+
+## M3Z：跨复位读回通道金丝雀（`tools/m3v/canary.py`）
+
+用户侧核实：boot-args 无 `sheng-platform-*`（mkadt /chosen 无 boot-args 属性；DarwinBoot 命令行只来自
+payload toml，无 args 字段），configure 的 5 处复位未武装。(a) 余：未钩向量槽、EL3 侧复位。canary 判 (b)。
+
+`initialize_screen` 的 `ret`（0x…73B087C，读数 #3 确认到达）→ `b 0x…73E0500`；35 字金丝雀按 M3E 格式写
+args VA 0xFFFFFFF007F14800（CODE 0xEE、ESR 0xC0FFEE01/00、ELR=0x…73B087C、FAR 0xCA4A），
+变体 C 对两条缓存行 `dc civac`，变体 N（`--no-clean`）同位换 nop，然后跳 M3E PSCI 尾 0x…73DC710。
+
+配方：现役 M3U → `fix_console_pa.py` → `canary.py`（不叠 `--set console`、不叠 `panic_rec.py`，脚本门禁拒绝）。
+合计 37 字。门禁：ret 原字、M3E 尾 4 字、NOP 区逐字核对；合成底稿（原版+M3E 尾）模拟、反汇编核对通过。
+
+| 读回第 3–4 行 | 结论 |
+| --- | --- |
+| C：`EXC ee ESR c0ffee01` / `ELR fffffff0073b087c FAR ca4a` | 内核写 + 清到 PoC 能跨温复位；再刷 N 判缓存 |
+| N 也出现 | PSCI/EL3 会刷缓存，(b) 不成立 ⇒ 回 (a)：钩剩余向量槽 / 查 EL3 复位 |
+| N 不出现 | 脏行随复位丢失 ⇒ M3E 记录器与 PROG 写补 `dc civac` |
+| C 不出现 | 固件侧读回通道坏（地址 / 时序 / XBL-ABL 清内存），PROG NONE 同因，先修通道 |
+
+设备行为：每轮在 initialize_screen 返回时立即复位（数秒内回菜单），属预期。
