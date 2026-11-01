@@ -184,3 +184,30 @@ initialize_screen 内分支多（按 op 走不同路径），中间点不全命�
 **源码层待办**（M4 线必须做，M3 可先用二进制修复）：上游 xnu `pexpert/arm` BCM2837 路径
 硬编码了这个 panic-log 地址；应在 ci/0019 的 xnu 补丁里改成按板配置（或在 flashlm 上关闭），
 不能把二进制修复带进 16K 单体内核线。
+
+## 真机读数 #3（2026-11-01，M3W + console 点集）
+
+条带红→橙→黄绿→绿→春绿→蓝→白；row-3 idx1 紫 (168,28,244) = P2 第二次调用（P5 先亮后被覆盖）。
+⇒ **M3W 修复真机生效**，PE_create_console / initialize_screen / PE_init_printf 全过；M3 原始冻结治愈。
+设备「一闪而过、自动重启」并回到菜单：后续某处 panic 触发了 M3D 的 panic→PSCI 改道（首次真正触发）。
+新终点：P2 第二次之后、P9 之前（machine_startup / bootstrap 区段）。
+
+## M3X：panic 现场记录（`tools/m3v/panic_rec.py`）
+
+M3D 的 `_panic` 入口 `b 0x…73E1010` 改指向 0x…73E0500 的 28 字记录器，按 M3E 面包屑格式写
+args VA 0xFFFFFFF007F14800，再落 M3D 的 PSCI 尾。现有 DarwinBoot crumb readback 下一轮画在
+DiagDraw 第 3–4 行：
+
+| 行 | 内容 |
+| --- | --- |
+| `EXC 50 ESR <x1>` | CODE 0x50 = panic（M3E 向量码是 0/3/4/7/C4–C6，不会混）；ESR 槽放 panic 第一个参数 |
+| `ELR <x30> FAR <x0>` | x30 = 调用 panic() 的返回地址；x0 = panic 格式串 VA |
+
+与 M3E 记录器差别：不读系统寄存器；复位前对两条面包屑缓存行 `dc civac` 到 PoC，防温复位丢行。
+29 字改动；`as` 汇编、补丁后反汇编核对（_panic → 0x…73E0500，尾跳 0x…73E1010）。
+
+叠加顺序（模拟通过，共 355 字）：现役 M3U → `fix_console_pa.py` → `panic_rec.py` → `patch_trace.py --set console`。
+panic_rec 占 cave 2 低端，patch_trace 从高端分配，不冲突；输入不含 M3D 时脚本拒绝。
+
+**先看现有读数**：若当前循环的菜单帧第 3–4 行已经有 `EXC` 行（CODE 0/3/4/7/C4–C6），说明是
+M3E 记录的异常复位，不必刷 M3X，直接按 ELR/FAR 判读。
