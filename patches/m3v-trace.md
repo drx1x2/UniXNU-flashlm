@@ -337,3 +337,10 @@ Unicorn 实跑：g_crypto_funcs = 0x...73E0780，四个活槽返回值正确，�
 
 配方：M3U → fix_console_pa → halt_tail → uuid_skip → crypto_reg，固件 v3.7。与 canary/panic_rec/trace console 互斥。
 下一步若陷阱报 digest/hmac 槽：内核自带 ccdigest_init/update、ccsha1_di、ccsha256_di、cchmac*，可逐槽接真实现。
+
+## M3Z5 读数与 M3Z6（记录 LR）
+
+M3Z5 真机：ESR 0x86000005（EC 0x21 取指中止，L1 翻译故障），ELR 0，FAR 0，CODE 0；陷阱未触发
+（否则 ESR 为 c0de00xx）⇒ random_kmem 已越过，新死点是**经 NULL 函数指针的调用/跳转**。ELR/FAR 无信息，调用者只在 x30。
+M3Z6 `tools/m3v/lr_rec.py`：把 M3E 记录器 0x...73DC6C0 的 `str x2,[x3,#0x18]`（FAR）改为 `str x30,[x3,#0x18]`（f9000c7e），
+v3.7 第 4/5 行改读 LR（lo/hi）。配方：…→ crypto_reg → lr_rec，固件 v3.7 不变。LR−4 即 blr 处（若为 br 尾调用则 LR 是上一层返回点）。
