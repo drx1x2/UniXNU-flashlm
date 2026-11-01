@@ -1,0 +1,15 @@
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -472,6 +472,12 @@
+         DiagDraw (Line, Row++);
+       }
+     }
++    //
++    // flashlm M2I (UniXNU-flashlm patches/darwinboot-nowindow-stall.patch):
++    // hold the NO WINDOW report for 5 s so the requested window size and
++    // the FREE rows can be photographed before the caller redraws over it.
++    //
++    gBS->Stall (5000000);
+ 
+   }
+   FreePool (Map);

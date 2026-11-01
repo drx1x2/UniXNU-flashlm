@@ -1,0 +1,70 @@
+diff --git a/DarwinBootPkg/Driver/DarwinBoot.c b/DarwinBootPkg/Driver/DarwinBoot.c
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -404,6 +404,24 @@
+   }
+ }
+ 
++//
++// flashlm bring-up black box (UniXNU-flashlm patches/darwinboot-diagdraw.patch):
++// on a boot failure, draw "DB <stage> <what> <status>" on a stage-owned
++// framebuffer row and hold it for 15 s, so it can be photographed before the
++// caller redraws over the console. Success paths never call this.
++//
++STATIC
++VOID
++DbFail (UINTN Stage, CONST CHAR16 *What, EFI_STATUS Status)
++{
++  CHAR16 Line[64];
++
++  UnicodeSPrint (Line, sizeof (Line), L"DB %u %s %r", (UINT32)Stage, What, Status);
++  DiagDraw (Line, Stage);
++  Print (L"%s\n", Line);
++  gBS->Stall (15 * 1000 * 1000);
++}
++
+ STATIC
+ EFI_STATUS
+ AllocateWindow (KERNEL *Kernel, UINT64 WindowSize, EFI_PHYSICAL_ADDRESS *Address)
+@@ -512,6 +530,7 @@
+ 
+   (VOID)This;
+   if ((Request == NULL) || (Request->Volume == NULL) || (Request->KernelPath == NULL)) { return EFI_INVALID_PARAMETER; }
++  DiagDraw (L"DB 0 ENTER", 0);
+   if ((Request->KextCount != 0) || (Request->DeviceTree != NULL) || (Request->DeviceTreeSize != 0) ||
+       (DarwinCurrentEl () != 4)) {
+     Print (L"DARWINBOOT: unsupported inputs or exception level; firmware retained\n");
+@@ -542,27 +561,27 @@
+   Address = 0;
+   Capacity = 0;
+   Status = gBS->HandleProtocol (Request->Volume, &gEfiSimpleFileSystemProtocolGuid, (VOID **)&Fs);
+-  if (EFI_ERROR (Status)) { return Status; }
++  if (EFI_ERROR (Status)) { DbFail (6, L"VOLUME", Status); return Status; }
+   Status = Fs->OpenVolume (Fs, &Root);
+-  if (EFI_ERROR (Status)) { return Status; }
++  if (EFI_ERROR (Status)) { DbFail (6, L"VOLUME", Status); return Status; }
+   Status = ReadFile (Root, Request->KernelPath, SIZE_128MB, &Image, &ImageSize);
+-  if (EFI_ERROR (Status)) { goto Fail; }
++  if (EFI_ERROR (Status)) { DbFail (1, L"KERNEL", Status); goto Fail; }
+   Status = ParseKernel (Image, ImageSize, &Kernel);
+-  if (EFI_ERROR (Status)) { goto Fail; }
++  if (EFI_ERROR (Status)) { DbFail (2, L"PARSE", Status); goto Fail; }
+   Length = StrSize (Request->KernelPath);
+   TreePath = AllocatePool (Length + 11 * sizeof (CHAR16));
+   if (TreePath == NULL) { Status = EFI_OUT_OF_RESOURCES; goto Fail; }
+   CopyMem (TreePath, Request->KernelPath, Length);
+   StrCatS (TreePath, Length / sizeof (CHAR16) + 11, L".adt");
+   Status = ReadFile (Root, TreePath, SIZE_16MB, &Tree, &TreeSize);
+-  if (EFI_ERROR (Status)) { goto Fail; }
++  if (EFI_ERROR (Status)) { DbFail (3, L"ADT", Status); goto Fail; }
+   Offset = 0;
+   RamdiskOffset = MAX_UINTN;
+   TrustCacheOffset = MAX_UINTN;
+   AddonOffset = MAX_UINTN;
+   WindowSize = 0;
+   KeepPacked = FALSE;
+-  if (!AdtNode (Tree, TreeSize, &Offset, 0, 3, &RamdiskOffset, &TrustCacheOffset, &AddonOffset, &WindowSize, &KeepPacked) || (Offset != TreeSize)) { Status = EFI_COMPROMISED_DATA; goto Fail; }
++  if (!AdtNode (Tree, TreeSize, &Offset, 0, 3, &RamdiskOffset, &TrustCacheOffset, &AddonOffset, &WindowSize, &KeepPacked) || (Offset != TreeSize)) { Status = EFI_COMPROMISED_DATA; DbFail (4, L"ADTWALK", Status); goto Fail; }
+   if (KeepPacked && (!RamdiskPacked || (RamdiskOffset == MAX_UINTN))) { Status = EFI_COMPROMISED_DATA; goto Fail; }
+   if (WindowSize == 0) { WindowSize = WINDOW_SIZE; }
+   if (Kernel.Base > MAX_UINT64 - WindowSize) { Status = EFI_LOAD_ERROR; goto Fail; }

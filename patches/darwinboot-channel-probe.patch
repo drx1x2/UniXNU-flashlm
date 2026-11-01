@@ -1,0 +1,103 @@
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -6,6 +6,7 @@
+ #include <Library/DebugLib.h>
+ #include <Library/MemoryAllocationLib.h>
+ #include <Library/UefiBootServicesTableLib.h>
++#include <Library/UefiRuntimeServicesTableLib.h>
+ #include <Library/PrintLib.h>
+ #include <Library/UefiLib.h>
+ #include <Protocol/UniXNULoader.h>
+@@ -46,6 +47,13 @@
+ } KERNEL;
+ 
+ STATIC EFI_HANDLE  mImage;
++
++//
++// flashlm M3H (UniXNU-flashlm patches/firmware-channel-probe.md):
++// vendor GUID of the M3Probe UEFI variable used by the out-of-window
++// channel probe in Boot. Fixed for this device repository.
++//
++STATIC CONST EFI_GUID  mM3ProbeVariableGuid = { 0x8d0451b3, 0xadd8, 0x4e53, { 0x81, 0x97, 0xd7, 0x84, 0x6a, 0xe1, 0x41, 0x31 } };
+ UINT64 EFIAPI DarwinCurrentEl (VOID);
+ VOID EFIAPI DarwinEnter (UINT64 Args, UINT64 Entry, UINT64 Memory, UINT64 Size, UINT64 VideoBase, UINT64 VideoBytes);
+ 
+@@ -724,6 +732,42 @@
+     DiagDraw (ProgLine, 5);
+     ZeroMem ((VOID *)(UINTN)ProgAddress, 0x18);
+   }
++  //
++  // flashlm M3H (UniXNU-flashlm patches/firmware-channel-probe.md):
++  // out-of-window record-channel probes, read with the rest of the
++  // readback block (before the window ZeroMem below). The M3G verdict
++  // (PRB NO with PROG NONE on hardware) proved the in-window record
++  // page does not survive a forced power-cycle reboot on this
++  // device, so two window-independent candidates are tested: SLT =
++  // the BootShim reserved slot page at 0x89B00100 (BootShim writes
++  // only +0x00 there and UniXNURamDiskDxe reads only +0x00; this
++  // driver is the only user of +0x100), and VAR = a non-volatile
++  // UEFI variable in the platform variable store. The companion
++  // writes sit at the bottom of Boot next to the PRB write. Row 7
++  // is always drawn; a matching magic means the previous boot's
++  // write survived the reboot. Every error path degrades silently
++  // to NO and never affects the boot flow.
++  //
++  {
++    volatile UINT64  *Slt;
++    UINT64            VarValue;
++    UINTN             VarSize;
++    EFI_STATUS        VarStatus;
++    CHAR16            ChanLine[64];
++
++    Slt = (volatile UINT64 *)(UINTN)0x89B00100;
++    VarValue = 0;
++    VarSize = sizeof (VarValue);
++    VarStatus = EFI_NOT_FOUND;
++    if ((gRT != NULL) && (gRT->GetVariable != NULL)) {
++      VarStatus = gRT->GetVariable (L"M3Probe", (EFI_GUID *)&mM3ProbeVariableGuid, NULL, &VarSize, &VarValue);
++    }
++
++    UnicodeSPrint (ChanLine, sizeof (ChanLine), L"SLT %s VAR %s",
++                   (*Slt == 0x534C5431ULL) ? L"OK" : L"NO",
++                   (!EFI_ERROR (VarStatus) && (VarSize == sizeof (UINT64)) && (VarValue == 0x56415231ULL)) ? L"OK" : L"NO");
++    DiagDraw (ChanLine, 7);
++  }
+   ArgsAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB);
+   TreeAddress = ArgsAddress + EFI_PAGE_SIZE;
+   RamdiskAddress = ALIGN_VALUE (TreeAddress + TreeSize, EFI_PAGE_SIZE);
+@@ -812,6 +856,25 @@
+   // tail for the next boot's readback to find.
+   //
+   *(volatile UINT64 *)(UINTN)(ArgsAddress + 0x860) = 0x50524231ULL;
++  //
++  // flashlm M3H: companion writes for the SLT/VAR channel readback
++  // above (same placement as the PRB write: after this boot's
++  // window fills, before DarwinEnter). The slot write goes to the
++  // BootShim reserved page outside the window; the variable write
++  // targets the platform variable store. Fire-and-forget: a failed
++  // SetVariable is ignored by design.
++  //
++  {
++    UINT64  VarMagic;
++
++    *(volatile UINT64 *)(UINTN)0x89B00100 = 0x534C5431ULL;
++    VarMagic = 0x56415231ULL;
++    if ((gRT != NULL) && (gRT->SetVariable != NULL)) {
++      (VOID)gRT->SetVariable (L"M3Probe", (EFI_GUID *)&mM3ProbeVariableGuid,
++                              EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
++                              sizeof (VarMagic), &VarMagic);
++    }
++  }
+   for (Attempt = 0; Attempt < 3; Attempt++) {
+     MapSize = Capacity;
+     Status = gBS->GetMemoryMap (&MapSize, Map, &Key, &Stride, &Version);
+--- a/DarwinBootPkg/Driver/DarwinBoot.inf
++++ b/DarwinBootPkg/Driver/DarwinBoot.inf
+@@ -28,6 +28,7 @@
+   UefiBootServicesTableLib
+   UefiDriverEntryPoint
+   UefiLib
++  UefiRuntimeServicesTableLib
+ 
+ [Protocols]
+   gUniXNULoaderProtocolGuid ## PRODUCES

@@ -1,0 +1,71 @@
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -872,6 +872,38 @@
+     DiagDraw (ChanLine, 7);
+   }
+   //
++  // flashlm M3L (UniXNU-flashlm patches/darwinboot-cpy-readback.patch):
++  // earliest-reader copies, read with the rest of the readback block.
++  // This boot's BootShim, at its very entry (before its x0 slot store,
++  // hence before SEC/PEI/DXE and any firmware allocation), copied two
++  // previous-boot records into the slot page: the previous window's
++  // PSCI slot 0 -- read at window landing + 0xF10000 + 0x900, the
++  // landing being proven constant across M3C-M3K -- into slot +0x08,
++  // and the SLT probe original at slot +0x100 into slot +0x10. Row 8
++  // is always drawn. First field OK means the PSCI record survived
++  // the reset and ABL and was already safe at BootShim entry; if the
++  // PSCI block below then disagrees with the window original, the
++  // overwrite happened inside this boot's firmware, after the shim
++  // ran (the state machine therefore takes its k from the copy, not
++  // from the window). First field NO means the value was already
++  // gone at BootShim entry: the record died in the reset itself or
++  // in ABL's early init, before any UEFI code ran. The second field
++  // is the same test for the SLT probe, against the Row 7 read of
++  // the original at +0x100.
++  //
++  {
++    volatile UINT64  *CpyWin;
++    volatile UINT64  *CpySlt;
++    CHAR16            CpyLine[64];
++
++    CpyWin = (volatile UINT64 *)(UINTN)0x89B00008;
++    CpySlt = (volatile UINT64 *)(UINTN)0x89B00010;
++    UnicodeSPrint (CpyLine, sizeof (CpyLine), L"CPY %s %s",
++                   (*CpyWin == 0x5053434900000000ULL) ? L"OK" : L"NO",
++                   (*CpySlt == 0x534C5431ULL) ? L"OK" : L"NO");
++    DiagDraw (CpyLine, 8);
++  }
++  //
+   // flashlm M3J (UniXNU-flashlm patches/firmware-psci-survival-test.md):
+   // PSCI warm-reset DRAM survival self-test, last in the readback
+   // block (still before the window ZeroMem below). Every cross-boot
+@@ -905,13 +937,22 @@
+ 
+     PsciAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB) + 0x900;
+     Psci = (volatile UINT64 *)(UINTN)PsciAddress;
+-    Written = 0;
+-    while ((Written < 8) && (Psci[Written] == (0x5053434900000000ULL | (UINT64)Written))) {
+-      Written++;
+-    }
+-
+-    Odd = (Written >= 2);
+-    for (Index = Written + 1; Index < 8; Index++) {
++    //
++    // flashlm M3L: k is taken from the BootShim copy of slot 0 (slot
++    // page +0x08, see the CPY block above), not from the window
++    // originals: the copy was taken before any DXE allocation could
++    // scribble over the freshly landed window, so it is the earliest
++    // surviving witness of the previous boot's write. A missing copy
++    // counts as k == 0. The window originals are still scanned for
++    // the out-of-sequence anomaly (a slot past slot 0 holding its own
++    // magic), and window slot 0 remains the arm branch's write
++    // target -- next boot's BootShim copies from there. Branch
++    // semantics are unchanged from M3J: k == 0 arms and resets,
++    // k == 1 draws SURVIVED and writes nothing, ODD never resets.
++    //
++    Written = (*(volatile UINT64 *)(UINTN)0x89B00008 == 0x5053434900000000ULL) ? 1 : 0;
++    Odd = FALSE;
++    for (Index = 1; Index < 8; Index++) {
+       if (Psci[Index] == (0x5053434900000000ULL | (UINT64)Index)) {
+         Odd = TRUE;
+       }

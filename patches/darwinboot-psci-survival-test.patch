@@ -1,0 +1,126 @@
+diff --git a/DarwinBootPkg/Driver/DarwinBoot.c b/DarwinBootPkg/Driver/DarwinBoot.c
+index 26c9313..8200b3e 100644
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -57,6 +57,36 @@ STATIC CONST EFI_GUID  mM3ProbeVariableGuid = { 0x8d0451b3, 0xadd8, 0x4e53, { 0x
+ UINT64 EFIAPI DarwinCurrentEl (VOID);
+ VOID EFIAPI DarwinEnter (UINT64 Args, UINT64 Entry, UINT64 Memory, UINT64 Size, UINT64 VideoBase, UINT64 VideoBytes);
+ 
++//
++// flashlm M3J (UniXNU-flashlm patches/firmware-psci-survival-test.md):
++// issue PSCI SYSTEM_RESET (SMC32 function id 0x84000009) through EL3.
++// The instruction encodings are the ones the assembler produced for
++// the M3D kernel stub (patches/kernel-panic-psci-reroute.md: movz
++// 52800120, movk 72b08000, smc d4000003). x1-x3 are zeroed (the reset
++// entry point and context id default), and the SMC calling
++// convention's caller-saved range is declared clobbered. Returns only
++// if EL3 refuses the call.
++//
++STATIC
++VOID
++M3JPsciSystemReset (
++  VOID
++  )
++{
++  __asm__ volatile (
++    "movz w0, #0x9\n"
++    "movk w0, #0x8400, lsl #16\n"
++    "mov x1, xzr\n"
++    "mov x2, xzr\n"
++    "mov x3, xzr\n"
++    "smc #0\n"
++    :
++    :
++    : "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9",
++      "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory"
++    );
++}
++
+ #define READ_SYSREG(Name)  ({ UINT64 Value_; __asm__ volatile ("mrs %0, " #Name : "=r" (Value_)); Value_; })
+ 
+ STATIC UINT32 U32 (CONST VOID *P) { return ReadUnaligned32 ((CONST UINT32 *)P); }
+@@ -768,6 +798,84 @@ Boot (
+                    (!EFI_ERROR (VarStatus) && (VarSize == sizeof (UINT64)) && (VarValue == 0x56415231ULL)) ? L"OK" : L"NO");
+     DiagDraw (ChanLine, 7);
+   }
++  //
++  // flashlm M3J (UniXNU-flashlm patches/firmware-psci-survival-test.md):
++  // PSCI warm-reset DRAM survival self-test, last in the readback
++  // block (still before the window ZeroMem below). Every cross-boot
++  // record read so far (window page in M3F-M3G; slot page and UEFI
++  // variable in M3H) was taken after a forced power-cycle reboot
++  // (long-press power + volume-down, an electrically deep PMIC
++  // reset); whether a PSCI SYSTEM_RESET (warm reset) keeps DRAM
++  // contents has never been measured on this device, and it is the
++  // shared premise of the watchdog-readback route and of every
++  // reset-based record channel (the M3E recorder implicitly relies
++  // on it). Eight u64 sub-slots at ArgsAddress + 0x900 (the boot-args
++  // struct ends at +0x480; the EXC record spans +0x800..847, the
++  // PROG slot +0x848..85F, the PRB probe +0x860..867) hold per-slot
++  // magics 0x5053434900000000|k. k = the number of leading slots
++  // holding their own magic; nonzero DRAM garbage elsewhere is not a
++  // magic match and is ignored, because an untouched window reads as
++  // garbage on a first boot and must still count as k == 0. Only
++  // k == 0 and k == 1 are reachable by construction: the arm branch
++  // writes slot 0 only and resets, the survived branch writes
++  // nothing, so the firmware can never reset twice in a row on its
++  // own (the anti-loop guard). k >= 2, or a magic sitting in a slot
++  // past the leading run, means the slots were written out of
++  // sequence: report ODD and hand off normally.
++  //
++  {
++    UINTN               PsciAddress;
++    volatile UINT64     *Psci;
++    UINTN               Written;
++    UINTN               Index;
++    BOOLEAN             Odd;
++
++    PsciAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB) + 0x900;
++    Psci = (volatile UINT64 *)(UINTN)PsciAddress;
++    Written = 0;
++    while ((Written < 8) && (Psci[Written] == (0x5053434900000000ULL | (UINT64)Written))) {
++      Written++;
++    }
++
++    Odd = (Written >= 2);
++    for (Index = Written + 1; Index < 8; Index++) {
++      if (Psci[Index] == (0x5053434900000000ULL | (UINT64)Index)) {
++        Odd = TRUE;
++      }
++    }
++
++    if (!Odd && (Written == 0)) {
++      Psci[0] = 0x5053434900000000ULL;
++      //
++      // The record must reach DRAM, not sit in a dirty cache line a
++      // reset would drop: clean the slot range to the point of
++      // coherency and barrier before issuing the reset.
++      //
++      __asm__ volatile ("dc cvac, %0" :: "r" ((UINTN)PsciAddress) : "memory");
++      __asm__ volatile ("dc cvac, %0" :: "r" ((UINTN)PsciAddress + 63) : "memory");
++      __asm__ volatile ("dsb sy" ::: "memory");
++      __asm__ volatile ("isb" ::: "memory");
++      DiagDraw (L"PSCI TEST ARMED", 9);
++      gBS->Stall (15 * 1000 * 1000);
++      M3JPsciSystemReset ();
++      //
++      // The SMC returned, so the reset did not fire through PSCI.
++      // Fall back to the runtime-services warm reset; if that also
++      // returns, give up on resetting and hand off normally.
++      //
++      DiagDraw (L"PSCI NOFIRE", 10);
++      if ((gRT != NULL) && (gRT->ResetSystem != NULL)) {
++        gRT->ResetSystem (EfiResetWarm, EFI_SUCCESS, 0, NULL);
++      }
++    } else if (!Odd && (Written == 1)) {
++      DiagDraw (L"PSCI SURVIVED", 9);
++    } else {
++      CHAR16  OddLine[64];
++
++      UnicodeSPrint (OddLine, sizeof (OddLine), L"PSCI ODD k=%d", (UINT32)Written);
++      DiagDraw (OddLine, 9);
++    }
++  }
+   ArgsAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB);
+   TreeAddress = ArgsAddress + EFI_PAGE_SIZE;
+   RamdiskAddress = ALIGN_VALUE (TreeAddress + TreeSize, EFI_PAGE_SIZE);

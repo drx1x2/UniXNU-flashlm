@@ -1,0 +1,99 @@
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -648,6 +648,82 @@
+     UnicodeSPrint (WinLine, sizeof (WinLine), L"WIN %lx SZ %lx", (UINT64)Address, WindowSize);
+     DiagDraw (WinLine, 2);
+   }
++  //
++  // flashlm M3G (UniXNU-flashlm patches/darwinboot-crumb-readback.patch):
++  // survival probe, read first in the readback block. Each boot that
++  // reaches the hand-off preparations writes the probe magic into the
++  // boot-args page tail (ArgsAddress + 0x860, past the EXC record and
++  // the PROG slot, which the kernel never writes) after the window
++  // ZeroMem below; on the next boot the value found here tells whether
++  // anything in this page survives a reboot at all (forced power-cycle
++  // included). Row 6 is always drawn, separately from the PROG row:
++  // 'PRB OK' = the previous boot's write survived, 'PRB NO' = the
++  // cross-boot record channel itself is broken on this device.
++  //
++  {
++    UINTN               ProbeAddress;
++    volatile UINT64     *Probe;
++
++    ProbeAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB) + 0x860;
++    Probe = (volatile UINT64 *)(UINTN)ProbeAddress;
++    DiagDraw ((*Probe == 0x50524231ULL) ? L"PRB OK" : L"PRB NO", 6);
++  }
++  //
++  // flashlm M3E (UniXNU-flashlm patches/darwinboot-crumb-readback.patch):
++  // exception black-box readback. The M3E diagnostic kernel records an
++  // early exception into the tail of the boot-args page (ArgsAddress +
++  // 0x800, past the 0x480-byte DARWIN_BOOT_ARGS) and resets via PSCI;
++  // DRAM contents survive the reset, so on this boot the record left by
++  // a crashed previous boot still sits in the freshly allocated window
++  // (same size, same landing) and must be read before the window
++  // ZeroMem below wipes it. Read-only unless both magics match: a match
++  // draws the record on DiagDraw rows 3-4 and clears it.
++  //
++  {
++    UINTN               CrumbAddress;
++    volatile UINT64     *Crumb;
++
++    CrumbAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB) + 0x800;
++    Crumb = (volatile UINT64 *)(UINTN)CrumbAddress;
++    if ((Crumb[0] == 0x4D33455843524D31ULL) && (Crumb[8] == 0x4D33455843524D32ULL)) {
++      CHAR16  ExcLine[64];
++      CHAR16  ElrLine[64];
++
++      UnicodeSPrint (ExcLine, sizeof (ExcLine), L"EXC %lx ESR %lx", Crumb[4], Crumb[1]);
++      UnicodeSPrint (ElrLine, sizeof (ElrLine), L"ELR %lx FAR %lx", Crumb[2], Crumb[3]);
++      DiagDraw (ExcLine, 3);
++      DiagDraw (ElrLine, 4);
++      ZeroMem ((VOID *)(UINTN)CrumbAddress, 0x48);
++    }
++  }
++  //
++  // flashlm M3F (UniXNU-flashlm patches/darwinboot-crumb-readback.patch):
++  // milestone progress readback, companion to the M3E block above. The
++  // M3F diagnostic kernel updates a progress slot at ArgsAddress + 0x848
++  // (right past the 0x48-byte exception record) on entry to each of ten
++  // early-boot milestones: magic 'PROG', latest milestone id, hit count.
++  // The slot survives a forced reboot in DRAM, so on this boot it shows
++  // how far the previous boot's kernel got before it froze. Row 5 is
++  // always drawn ('PROG NONE' when no valid record is present), and the
++  // slot is cleared after the draw. M3G extends the valid id range with
++  // the locore milestones 0x11-0x15 (see patches/kernel-locore-prog.md).
++  //
++  {
++    UINTN               ProgAddress;
++    volatile UINT64     *Prog;
++    CHAR16              ProgLine[64];
++
++    ProgAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB) + 0x848;
++    Prog = (volatile UINT64 *)(UINTN)ProgAddress;
++    if ((Prog[0] == 0x474F5250ULL) &&
++        (((Prog[1] >= 1) && (Prog[1] <= 10)) || ((Prog[1] >= 0x11) && (Prog[1] <= 0x15)))) {
++      UnicodeSPrint (ProgLine, sizeof (ProgLine), L"PROG %lx CNT %lx", Prog[1], Prog[2]);
++    } else {
++      UnicodeSPrint (ProgLine, sizeof (ProgLine), L"PROG NONE");
++    }
++    DiagDraw (ProgLine, 5);
++    ZeroMem ((VOID *)(UINTN)ProgAddress, 0x18);
++  }
+   ArgsAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB);
+   TreeAddress = ArgsAddress + EFI_PAGE_SIZE;
+   RamdiskAddress = ALIGN_VALUE (TreeAddress + TreeSize, EFI_PAGE_SIZE);
+@@ -729,6 +805,13 @@
+           READ_SYSREG (id_aa64mmfr0_el1) & 0xF, (((READ_SYSREG (id_aa64mmfr0_el1) >> 28) & 0xF) == 0xF) ? "NOT supported" : "supported"));
+   DEBUG ((DEBUG_ERROR, "ID_AA64PFR0_EL1  0x%lx\n", READ_SYSREG (id_aa64pfr0_el1)));
+   DEBUG ((DEBUG_ERROR, "\nExiting boot services. A green bar across the top\nmarks the loader handoff before the kernel branch.\n"));
++  //
++  // flashlm M3G: survival probe write (companion to the PRB readback
++  // near the top of Boot). After this boot's window ZeroMem and fills,
++  // before DarwinEnter: leave the probe magic in the boot-args page
++  // tail for the next boot's readback to find.
++  //
++  *(volatile UINT64 *)(UINTN)(ArgsAddress + 0x860) = 0x50524231ULL;
+   for (Attempt = 0; Attempt < 3; Attempt++) {
+     MapSize = Capacity;
+     Status = gBS->GetMemoryMap (&MapSize, Map, &Key, &Stride, &Version);

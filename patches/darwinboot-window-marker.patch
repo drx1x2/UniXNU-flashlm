@@ -1,0 +1,23 @@
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -634,6 +634,20 @@
+   if (EFI_ERROR (Status)) { goto Fail; }
+   Status = AllocateWindow (&Kernel, WindowSize, &Address);
+   if (EFI_ERROR (Status)) { goto Fail; }
++  //
++  // flashlm M3C (UniXNU-flashlm patches/darwinboot-window-marker.patch):
++  // zero-behavior observation marker: draw the final window placement on
++  // DiagDraw row 2 so the landing address (high bank above 4 GiB vs mid
++  // bank below 4 GiB) can be read off the frozen hand-off frame. Draw
++  // only: no return value, control flow, value, or timing logic changes,
++  // and the failure paths above are untouched.
++  //
++  {
++    CHAR16  WinLine[64];
++
++    UnicodeSPrint (WinLine, sizeof (WinLine), L"WIN %lx SZ %lx", (UINT64)Address, WindowSize);
++    DiagDraw (WinLine, 2);
++  }
+   ArgsAddress = ALIGN_VALUE (Address + Kernel.End - Kernel.Base, SIZE_16KB);
+   TreeAddress = ArgsAddress + EFI_PAGE_SIZE;
+   RamdiskAddress = ALIGN_VALUE (TreeAddress + TreeSize, EFI_PAGE_SIZE);

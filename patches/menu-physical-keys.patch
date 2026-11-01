@@ -1,0 +1,236 @@
+Menu: take input from every SimpleTextIn, not just ConIn (physical keys)
+
+Mechanism
+---------
+The UniXNU menu loop (UniXNUMenuRun) and the confirmation prompt
+(UniXNUMenuConfirm) wait on gST->ConIn->WaitForKey and read from
+gST->ConIn only. On the Qualcomm Mu platforms this firmware targets,
+the console splitter never aggregates ButtonsDxe: that driver installs
+EFI_SIMPLE_TEXT_INPUT_PROTOCOL on its own handle to serve the
+MsButtonServices front page, so its keys exist in the system but can
+never reach ConIn. On flashlm this left the menu with no working
+input at all (touch and buttons both dead; only the countdown and the
+fallback-retry patch kept the board usable).
+
+Fix: enumerate every SimpleTextIn instance once per menu run
+(LocateHandleBuffer by protocol) and treat them all as the menu's
+keyboard -- the main loop adds every instance's WaitForKey to the
+existing WaitForEvent set next to the periodic timer and reads the key
+from whichever instance signaled; the confirmation prompt drains and
+waits across the same set via a shared helper. The splitter handle
+carries the protocol too, so ConIn is simply one entry of the list
+and is not special-cased (it is re-added explicitly only if the
+enumeration somehow finds nothing).
+
+No key translation is added: ButtonsDxe already emits exactly the
+codes the existing key switch consumes (stock flashlmdd binary,
+ButtonsLib key translation: volume up -> SCAN_UP, volume down ->
+SCAN_DOWN, power -> SCAN_SUSPEND; UnicodeChar 0 in all three cases).
+
+Deviation from upstream
+-----------------------
+Upstream UniXNU reads gST->ConIn exclusively in Menu.c. This patch
+changes only how input is sourced inside the two input functions of
+Menu.c; menu rendering, the countdown/fallback-retry semantics, the
+HasInput/rotation rules and the set of accepted keys are untouched.
+With no key pressed the behaviour is identical to before (waiting is
+still purely event driven, no polling is introduced).
+
+Applies on top of the current build-tree Menu.c (which already carries
+menu-fallback-retry.patch). Baseline Menu.c MD5:
+5c0f0322ce0fc3a52aee9d5850225509
+
+diff --git a/package/UniXNUPkg/Library/UniXNULib/Menu.c b/package/UniXNUPkg/Library/UniXNULib/Menu.c
+index 53689e4..d3e1e20 100644
+@@ -57,6 +57,85 @@
+   return Physical;
+ }
+ 
++//
++// The menu's keyboard is every SimpleTextIn instance in the system, not
++// just gST->ConIn. Upstream reads ConIn only, but on platforms where the
++// console splitter never aggregates a producer -- Qualcomm ButtonsDxe
++// installs SimpleTextIn on its own handle for the MsButtonServices front
++// page, and ConSplitter never picks it up -- the physical buttons then
++// exist yet the menu can never see them. Enumerating the protocol finds
++// them all; the splitter handle carries the protocol too, so ConIn is
++// simply one entry of the list and needs no special case.
++//
++#define MAX_TEXT_INPUTS  16
++
++STATIC
++UINTN
++CollectTextInputs (
++  OUT EFI_SIMPLE_TEXT_INPUT_PROTOCOL  **Inputs,
++  IN  UINTN                           Capacity
++  )
++{
++  EFI_STATUS  Status;
++  EFI_HANDLE  *Handles;
++  UINTN       HandleCount;
++  UINTN       Index;
++  UINTN       Count;
++
++  Status = gBS->LocateHandleBuffer (ByProtocol, &gEfiSimpleTextInProtocolGuid, NULL, &HandleCount, &Handles);
++  if (EFI_ERROR (Status)) {
++    return 0;
++  }
++
++  Count = 0;
++  for (Index = 0; (Index < HandleCount) && (Count < Capacity); Index++) {
++    EFI_SIMPLE_TEXT_INPUT_PROTOCOL  *Input;
++
++    if (!EFI_ERROR (gBS->HandleProtocol (Handles[Index], &gEfiSimpleTextInProtocolGuid, (VOID **)&Input)) &&
++        (Input != NULL))
++    {
++      Inputs[Count++] = Input;
++    }
++  }
++
++  FreePool (Handles);
++  return Count;
++}
++
++//
++// Wait until any of the inputs has a key, then read it from the input
++// that signaled. A signaled input whose queue turns out empty just waits
++// again, matching the caller's previous read-and-continue behaviour.
++//
++STATIC
++EFI_STATUS
++WaitAnyKey (
++  IN  EFI_SIMPLE_TEXT_INPUT_PROTOCOL  **Inputs,
++  IN  UINTN                           Count,
++  OUT EFI_INPUT_KEY                   *Key
++  )
++{
++  EFI_EVENT   Events[MAX_TEXT_INPUTS];
++  UINTN       Index;
++  EFI_STATUS  Status;
++
++  for ( ; ;) {
++    for (Index = 0; Index < Count; Index++) {
++      Events[Index] = Inputs[Index]->WaitForKey;
++    }
++
++    Status = gBS->WaitForEvent (Count, Events, &Index);
++    if (EFI_ERROR (Status)) {
++      return Status;
++    }
++
++    Status = Inputs[Index]->ReadKeyStroke (Inputs[Index], Key);
++    if (!EFI_ERROR (Status)) {
++      return Status;
++    }
++  }
++}
++
+ STATIC
+ VOID
+ DrawCountdown (
+@@ -90,11 +169,13 @@
+   IN BOOLEAN    Countdown
+   )
+ {
+-  EFI_STATUS     Status;
+-  EFI_EVENT      Timer;
+-  EFI_EVENT      Events[2];
+-  UINTN          EventCount;
+-  UINTN          Signaled;
++  EFI_STATUS                      Status;
++  EFI_EVENT                       Timer;
++  EFI_EVENT                       Events[MAX_TEXT_INPUTS + 1];
++  EFI_SIMPLE_TEXT_INPUT_PROTOCOL  *Inputs[MAX_TEXT_INPUTS];
++  UINTN                           InputCount;
++  UINTN                           EventCount;
++  UINTN                           Signaled;
+   EFI_INPUT_KEY  Key;
+   UINTN          Selected;
+   UINTN          Previous;
+@@ -163,10 +244,16 @@
+ 
+   gBS->SetTimer (Timer, TimerPeriodic, EFI_TIMER_PERIOD_MILLISECONDS (TICK_MS));
+ 
++  InputCount = CollectTextInputs (Inputs, MAX_TEXT_INPUTS);
++  if ((InputCount == 0) && (gST->ConIn != NULL)) {
++    Inputs[0]  = gST->ConIn;
++    InputCount = 1;
++  }
++
+   EventCount = 0;
+   Events[EventCount++] = Timer;
+-  if (gST->ConIn != NULL) {
+-    Events[EventCount++] = gST->ConIn->WaitForKey;
++  for (Index = 0; Index < InputCount; Index++) {
++    Events[EventCount++] = Inputs[Index]->WaitForKey;
+   }
+ 
+   UserActive      = FALSE;
+@@ -204,7 +291,7 @@
+         }
+       }
+     } else {
+-      if (EFI_ERROR (gST->ConIn->ReadKeyStroke (gST->ConIn, &Key))) {
++      if (EFI_ERROR (Inputs[Signaled - 1]->ReadKeyStroke (Inputs[Signaled - 1], &Key))) {
+         continue;
+       }
+ 
+@@ -410,11 +497,13 @@
+   OUT UINTN      *Choice
+   )
+ {
+-  EFI_INPUT_KEY  Key;
+-  UINTN          Index;
+-  UINTN          Shown;
+-  UINTN          Items;
+-  CHAR16         Line[160];
++  EFI_INPUT_KEY                   Key;
++  EFI_SIMPLE_TEXT_INPUT_PROTOCOL  *Inputs[MAX_TEXT_INPUTS];
++  UINTN                           InputCount;
++  UINTN                           Index;
++  UINTN                           Shown;
++  UINTN                           Items;
++  CHAR16                          Line[160];
+ 
+   *Choice = 0;
+   if ((gST->ConIn == NULL) || (CountInputDevices () == 0)) {
+@@ -422,6 +511,12 @@
+     return FALSE;
+   }
+ 
++  InputCount = CollectTextInputs (Inputs, MAX_TEXT_INPUTS);
++  if (InputCount == 0) {
++    Inputs[0]  = gST->ConIn;
++    InputCount = 1;
++  }
++
+   //
+   // With choices the items are the choices and then Cancel, and Cancel is shown first, so the first press cannot confirm anything.
+   //
+@@ -436,7 +531,9 @@
+   // The press that chose the entry, and anything typed since, must not answer the question.
+   //
+   gBS->Stall (500000);
+-  while (!EFI_ERROR (gST->ConIn->ReadKeyStroke (gST->ConIn, &Key))) {
++  for (Index = 0; Index < InputCount; Index++) {
++    while (!EFI_ERROR (Inputs[Index]->ReadKeyStroke (Inputs[Index], &Key))) {
++    }
+   }
+ 
+   for ( ; ;) {
+@@ -447,14 +544,10 @@
+       UniXNUUiDrawStatus (Ui, 1, L"");
+     }
+ 
+-    if (EFI_ERROR (gBS->WaitForEvent (1, &gST->ConIn->WaitForKey, &Index))) {
++    if (EFI_ERROR (WaitAnyKey (Inputs, InputCount, &Key))) {
+       return FALSE;
+     }
+ 
+-    if (EFI_ERROR (gST->ConIn->ReadKeyStroke (gST->ConIn, &Key))) {
+-      continue;
+-    }
+-
+     if (Items > 0) {
+       if (Key.ScanCode == SCAN_UP) {
+         Shown = (Shown + Items - 1) % Items;

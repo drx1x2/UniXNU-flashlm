@@ -1,0 +1,122 @@
+--- a/DarwinBootPkg/Driver/DarwinBoot.c
++++ b/DarwinBootPkg/Driver/DarwinBoot.c
+@@ -9,6 +9,7 @@
+ #include <Library/UefiRuntimeServicesTableLib.h>
+ #include <Library/PrintLib.h>
+ #include <Library/UefiLib.h>
++#include <Library/IoLib.h>
+ #include <Protocol/UniXNULoader.h>
+ #include <Protocol/LoadedImage.h>
+ #include <Protocol/GraphicsOutput.h>
+@@ -89,6 +90,73 @@
+ 
+ #define READ_SYSREG(Name)  ({ UINT64 Value_; __asm__ volatile ("mrs %0, " #Name : "=r" (Value_)); Value_; })
+ 
++//
++// flashlm M3K (UniXNU-flashlm patches/darwinboot-watchdog-arm.md):
++// arm the SM8150 APSS watchdog (memory-map entry APSS_WDT_TMR1) as the
++// last act before the ExitBootServices attempts, so a kernel that
++// hangs after the hand-off is reset by the watchdog bite ~29 s later
++// and the next boot's readback block can show the records the hung
++// boot left behind in DRAM. Register model, three sources in bitwise
++// agreement (full citations in the spec): CAF
++// drivers/soc/qcom/watchdog_v2.c -- the driver bound to this SoC's
++// "qcom,msm-watchdog" node -- defines WDT0_RST = +0x04, WDT0_EN =
++// +0x08, WDT0_BARK_TIME = +0x10, WDT0_BITE_TIME = +0x14 and counts at
++// WDT_HZ = 32765 Hz; mainline qcom-wdt.c's kpss layout carries the
++// same offsets and a 20-bit counter (max tick count 0xFFFFF, ~32 s).
++// Bark 26 s = 26 * 32765 = 851890 ticks, bite 29 s = 29 * 32765 =
++// 950185 ticks. Only EN bit 0 (enable) is set: bit 1 (unmasked bark
++// interrupt) stays clear and nothing pets the dog -- the bite is the
++// point.
++//
++#define M3K_WDT_BASE        0x17C10000
++#define M3K_WDT_RST         (M3K_WDT_BASE + 0x04)
++#define M3K_WDT_EN          (M3K_WDT_BASE + 0x08)
++#define M3K_WDT_BARK_TIME   (M3K_WDT_BASE + 0x10)
++#define M3K_WDT_BITE_TIME   (M3K_WDT_BASE + 0x14)
++#define M3K_WDT_BARK_TICKS  851890
++#define M3K_WDT_BITE_TICKS  950185
++
++STATIC_ASSERT (M3K_WDT_BARK_TICKS < 0x100000, "M3K bark ticks exceed the 20-bit watchdog counter");
++STATIC_ASSERT (M3K_WDT_BITE_TICKS < 0x100000, "M3K bite ticks exceed the 20-bit watchdog counter");
++
++//
++// Clear any watchdog arming left over from an earlier stage or boot.
++// The platform PrePi already writes EN = 0 on every boot; this is the
++// belt-and-braces copy at the loader's door, so every Boot() starts
++// from a known-quiet watchdog however the previous boot ended (bite,
++// forced power-cycle, or a clean return to the menu). The arming
++// further down only happens on the hand-off path, so a Boot() that
++// fails and returns to the menu leaves the dog disarmed.
++//
++STATIC
++VOID
++M3KWatchdogDisarm (
++  VOID
++  )
++{
++  MmioWrite32 (M3K_WDT_EN, 0);
++}
++
++//
++// Arm in the CAF init_wdog order: program BARK_TIME and BITE_TIME
++// while EN is still 0, set EN = 1 (bit 0 only), then write RST = 1,
++// which clears the counter and starts it -- the bite clock runs from
++// that write. The trailing read of EN posts the writes so they have
++// landed before the caller proceeds to ExitBootServices.
++//
++STATIC
++VOID
++M3KWatchdogArm (
++  VOID
++  )
++{
++  MmioWrite32 (M3K_WDT_BARK_TIME, M3K_WDT_BARK_TICKS);
++  MmioWrite32 (M3K_WDT_BITE_TIME, M3K_WDT_BITE_TICKS);
++  MmioWrite32 (M3K_WDT_EN, 1);
++  MmioWrite32 (M3K_WDT_RST, 1);
++  (VOID)MmioRead32 (M3K_WDT_EN);
++}
++
+ STATIC UINT32 U32 (CONST VOID *P) { return ReadUnaligned32 ((CONST UINT32 *)P); }
+ STATIC UINT64 U64 (CONST VOID *P) { return ReadUnaligned64 ((CONST UINT64 *)P); }
+ 
+@@ -573,6 +641,11 @@
+   UINT64                          Video[6];
+ 
+   (VOID)This;
++  //
++  // flashlm M3K: clear any leftover watchdog arming first of all
++  // (see M3KWatchdogDisarm above).
++  //
++  M3KWatchdogDisarm ();
+   if ((Request == NULL) || (Request->Volume == NULL) || (Request->KernelPath == NULL)) { return EFI_INVALID_PARAMETER; }
+   DiagDraw (L"DB 0 ENTER", 0);
+   if ((Request->KextCount != 0) || (Request->DeviceTree != NULL) || (Request->DeviceTreeSize != 0) ||
+@@ -983,6 +1056,15 @@
+                               sizeof (VarMagic), &VarMagic);
+     }
+   }
++  //
++  // flashlm M3K: arm the APSS watchdog as the last act before the
++  // ExitBootServices attempts below, so the ~29 s bite clock starts
++  // as close to the hand-off as this code can place it. Every failure
++  // path above this point returns through Fail with the dog still
++  // disarmed (entry disarm, no arm), so the menu -- including its
++  // Restart and Power off entries -- never runs with a live watchdog.
++  //
++  M3KWatchdogArm ();
+   for (Attempt = 0; Attempt < 3; Attempt++) {
+     MapSize = Capacity;
+     Status = gBS->GetMemoryMap (&MapSize, Map, &Key, &Stride, &Version);
+--- a/DarwinBootPkg/Driver/DarwinBoot.inf
++++ b/DarwinBootPkg/Driver/DarwinBoot.inf
+@@ -23,6 +23,7 @@
+   BaseLib
+   BaseMemoryLib
+   DebugLib
++  IoLib
+   MemoryAllocationLib
+   PrintLib
+   UefiBootServicesTableLib

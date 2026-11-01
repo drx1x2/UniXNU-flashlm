@@ -1,0 +1,44 @@
+diff --git a/BootShim/BootShim.S b/BootShim/BootShim.S
+index 76dcb4f9..fe66c7f7 100644
+--- a/BootShim/BootShim.S
++++ b/BootShim/BootShim.S
+@@ -34,6 +34,39 @@ _StackSize:
+ 	.long 0
+ 
+ _Start:
++	/* flashlm M3L (UniXNU-flashlm patches/bootshim-early-copy.patch):
++	   earliest-reader copies, taken before anything else in this
++	   shim runs -- in particular before the x0 slot store below,
++	   hence before SEC/PEI/DXE and any firmware allocation. Two
++	   previous-boot records are copied into this slot page, out of
++	   the places later stages could still overwrite:
++	     [0xC1F14900] = previous window's boot-args page PSCI slot 0
++	       (window landing 0xC1004000 with a 512 MiB window, proven
++	       constant across M3C-M3K; args page at window + 0xF10000,
++	       slot at args + 0x900)        -> slot +0x08
++	     [0x89B00100] = the SLT probe in this very page
++	                                    -> slot +0x10
++	   Slot +0x08/+0x10 have no other user (UniXNURamDiskDxe reads
++	   only +0x00). x6 is reloaded by the original code below and
++	   x7 is dead at entry; x0 and x1 are preserved. */
++	movz	x6, #0x4900
++	movk	x6, #0xC1F1, lsl #16
++	ldr		x7, [x6]
++	movz	x6, #0x0000
++	movk	x6, #0x89B0, lsl #16
++	str		x7, [x6, #8]
++	ldr		x7, [x6, #0x100]
++	str		x7, [x6, #0x10]
++
++	/* Preserve the device-tree pointer for UniXNURamDiskDxe.
++	   The classic AndromedaPkg PrePi in this firmware never turns x0
++	   into the UniXNU entry-argument HOB, so stash x0 at 0x89B00000,
++	   the head of the reserved "RAM Partition" region in the lg-flash
++	   memory map (PlatformMemoryMapLib.c). x6 is safe to clobber:
++	   _Start reloads it from _StackSize before the copy loop. */
++	movz	x6, #0x0000
++	movk	x6, #0x89B0, lsl #16
++	str		x0, [x6]
+ 	mov		x4, x1
+ 	ldr		x5, _StackBase
+ 	cmp		x4, x5

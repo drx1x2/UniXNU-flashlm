@@ -1,0 +1,18 @@
+diff --git a/package/UniXNUPkg/Library/UniXNULib/Menu.c b/package/UniXNUPkg/Library/UniXNULib/Menu.c
+index e3e4619..53689e4 100644
+--- a/package/UniXNUPkg/Library/UniXNULib/Menu.c
++++ b/package/UniXNUPkg/Library/UniXNULib/Menu.c
+@@ -112,9 +112,11 @@ UniXNUMenuRun (
+   HasInput = (CountInputDevices () > 0);
+ 
+   if (!Countdown) {
+-    RemainingMs = HasInput ? -1 : (INTN)Config->FallbackTimeout * 1000;
++    // flashlm bring-up: retry unconditionally (no usable input device on this board; a failed boot returns fast with no side effects) -- deviates from upstream's HasInput anti-boot-loop park.
++    RemainingMs = (INTN)Config->FallbackTimeout * 1000;
+   } else if (Config->Timeout < 0) {
+-    RemainingMs = HasInput ? -1 : (INTN)Config->FallbackTimeout * 1000;
++    // flashlm bring-up: retry unconditionally (no usable input device on this board; a failed boot returns fast with no side effects) -- deviates from upstream's HasInput anti-boot-loop park.
++    RemainingMs = (INTN)Config->FallbackTimeout * 1000;
+   } else {
+     RemainingMs = Config->Timeout * 1000;
+   }

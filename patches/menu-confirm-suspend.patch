@@ -1,0 +1,38 @@
+Menu confirm: accept the power key (SCAN_SUSPEND) as confirm
+
+Upstream inconsistency: UniXNUMenuConfirm draws the footer "Power key =
+confirm" (or "Power key: confirm" when choices are shown), but its accept
+set only contains CR/LF. The power key reaches the menu as SCAN_SUSPEND
+(ButtonsDxe, stock flashlmdd key translation) and therefore fell through
+to the catch-all cancel at the bottom of the loop -- the exact opposite of
+what the footer promises, and user-visible as soon as physical keys work
+(menu-physical-keys.patch).
+
+Fix: one condition -- add (Key.ScanCode == SCAN_SUSPEND) to the confirm
+accept set in UniXNUMenuConfirm. Nothing else changes; with choices shown,
+SCAN_SUSPEND confirms the highlighted choice exactly like Enter, including
+the highlighted-Cancel case.
+
+Applies on top of menu-physical-keys.patch (build-tree Menu.c blob
+d3e1e20). Archived for flashlm as UniXNU-flashlm
+patches/menu-confirm-suspend.patch.
+
+diff --git a/package/UniXNUPkg/Library/UniXNULib/Menu.c b/package/UniXNUPkg/Library/UniXNULib/Menu.c
+index d3e1e20..c90536d 100644
+--- a/package/UniXNUPkg/Library/UniXNULib/Menu.c
++++ b/package/UniXNUPkg/Library/UniXNULib/Menu.c
+@@ -560,7 +560,13 @@ UniXNUMenuConfirm (
+       }
+     }
+ 
+-    if ((Key.UnicodeChar == CHAR_CARRIAGE_RETURN) || (Key.UnicodeChar == CHAR_LINEFEED)) {
++    //
++    // flashlm: the prompt's footer promises "Power key = confirm", but upstream's
++    // accept set only had CR/LF, so the power key (SCAN_SUSPEND from
++    // ButtonsDxe) fell through to cancel. Accept it here to match the footer.
++    //
++    if ((Key.UnicodeChar == CHAR_CARRIAGE_RETURN) || (Key.UnicodeChar == CHAR_LINEFEED) ||
++        (Key.ScanCode == SCAN_SUSPEND)) {
+       if (Items > 0) {
+         if (Shown + 1 == Items) {
+           return FALSE;
