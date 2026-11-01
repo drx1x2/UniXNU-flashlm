@@ -14,3 +14,7 @@ scripts/base-d22ap.adt
 *.img
 *.bin
 *.dmg
+
+# M3U2 monitor blobs are rebuilt by tools/m3u/build.sh
+tools/m3u/*.bin
+tools/m3u/*.o

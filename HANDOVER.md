@@ -109,6 +109,15 @@ fastboot reboot        # 回退：set_active a（A 槽是原 Android + 其 boot 
   ecid/chip-id 长度精确合规，QEMU 之死是其注册表层空指针的模拟器假象。
   此点作为 **M4 注意事项**保留（§6），不是 M3 死点。
 
+- **🎯 终点已钉死（2026-11-01，M3U2 v3.5.2 真机）**：第三排 idx4＝明绿（S4，监控
+  开 MMU+缓存后在跑，PXN 修复真机成立）；idx2 绿对照正常；idx0 A 相心跳；idx3 黑
+  合设计；一、二排 10/10。**idx1＝金色**，实测 RGB (252,213,17)、G/R=0.845（同帧
+  L4 柠檬黄 1.000）⇒ 相干读出的精确终点是里程碑 **P4（`_pmap_bootstrap`）**，不是
+  旧淘汰值。结论：内核走过 P4、死在 **P4 之后、P5（`PE_init_printf` 返回）之前**，
+  区间涵盖 `pmap_bootstrap` 本体、`_arm_vm_init` 尾段、kprintf 初始化、
+  `PE_create_console`、`PE_init_printf` 本体。上文「P5 已证执行」据此**撤销**：
+  M3Q3 的粉色 P5 读数定性为缓存淘汰抽奖假象，真终点一直在 P4。
+
 ## 4. 观测通道与相干律（核心资产）
 
 M3 的全部难度在「怎么看见」。以下每条都是真机或走查实证，不是推测。
@@ -197,9 +206,19 @@ blob 驻留槽页 `0x89B00400`；看门狗在 CPU_ON **之前**已武装，SMC �
   交付到普通世界入口，换入真机实证可用的 v3.4 症状相同，是 rig 的问题；
   因此 v3.5 前导从未获得全栈演练（Unicorn 门只证了主体逻辑与建表走查）。
   前导调试必须真机主导，首步见 §5 甲 0。
+- **M3U2 更新（2026-11-01，主机侧定位，待真机确认）**：v3.5 槽页 L3 项
+  `0x743` 的 AP[2:1]=01（EL0 也可写），按 ARM ARM D8.4.1，EL0 可写即在
+  EL1 被视为 PXN——blob 正是在这一页上执行，开 SCTLR.M 后第一次取指
+  （`0x89B004F8`）即权限故障，无向量静默停泊，与「第三排全黑」吻合，属死因 (a)。
+  已出 **v3.5.2**（`0x743`→`0x703`，并在 idx4 加 S1–S4 阶段色标、固件对
+  表页 `dc civac`、分配失败画紫），门见 `tools/m3u/gate.py`，判读见
+  `patches/monitor-core-m3p.md` 的 M3U2 节。
 
 ## 5. 下一步选项（按序）
 
+- **✅ 甲 0′ 已完成（2026-11-01）：v3.5.2 真机读侧成立，终点＝P4→P5 之间（§3）。甲 0/甲 1/甲 2① 随之作废；下一步直接进入乙：在 P4→P5 区间内加更细桩（现役 v3.5.2 监控零改动即可精确读），二分 `pmap_bootstrap` 返回 / `_arm_vm_init` 返回 / kprintf 初始化后 / `PE_create_console` 后。**
+- ~~**甲 0′（已备好，先刷）：v3.5.2。** 修复 + 阶段色标合一刷；idx4 绿且 idx0
+  心跳即读侧成立，再按 M3U 判读读 idx1。若停在灰，再回到下面的甲 0 细分。
 - **甲 0（最便宜，先行）：v3.5.1 二分刷。** blob 在建表/开 MMU **之前**先以
   现役关缓存方式画 idx0 并闪一拍，分开「前导死」与「分配降级死」；若前导
   前活、前导后死，再在建表后、装 TTBR 后、开 SCTLR 后各加一记关缓存画法
@@ -219,5 +238,72 @@ blob 驻留槽页 `0x89B00400`；看门狗在 CPU_ON **之前**已武装，SMC �
 - **版本三角**：见 §1。16K 线的 kernelcache、prelink、用户态三者同进同退；
   M3 的 4K 线结论只有语义可迁移。
 - **generatePlatformUUID**：ADT 数据已证合规、QEMU 之死是模拟器假象（§3）；
-  但此函数在 16K 线上仍是
-...[truncated 7171 chars]
+  但此函数在 16K 线上仍是**必经点**：16.7.16 出货内核是 `xnu-8796.142.1.703.8`，
+  与 141.3 源码不同修订，M4 首启前须对该版本重新核对它从 `/chosen` 读取的
+  `unique-chip-id` / `chip-id` 长度与类型（〔重建〕具体措辞已丢失，此句据 §3 补全）。
+
+> 🔧 **§6 余文、§7、§8 为 2026-11-01 重建版，不是原文。** 原文在最初写文件时即被
+> 截断（原维护者本地副本与提交 `32406ef` 逐字节相同），无任何完整副本。以下内容
+> 只取自仓库内现存资料（AGENTS.md、DEVIATIONS.md、ci/README.md、NOTES.md、
+> patches/*.md、本文 §1–§5），每条注明出处；原文中仓库内无据可查的内容标「待补」，
+> 不臆造。
+
+- **iOS 16 内核来源**：iOS 16 无开源源码，「源码内核 + 原版 kernelcache prelink」
+  对 16.7.16 不存在可用组合；唯一实机验证过的做法是 16 KiB 单体内核（内置
+  HFS/AMFI/UFS/pthread，不 prelink）。（DEVIATIONS.md）
+- **16K 单体内核 workflow 尚未建立**：需 `MACHINE_CONFIG=FLASHLM` + 板级件替换，
+  先做板级移植；路线见开发工作区 `docs/notes/16-ios16-route.md` §16.3。（ci/README.md）
+- **M3 结论迁移边界**：可迁 ADT 语义、地址/桩位、观测通道与 §4.4 相干律；不可迁
+  4K 内核二进制、prelink 假设。（§1）
+- 其余雷区条目：**待补**。
+
+## 7. 构建纪律（重建）
+
+1. **不带 Sheng**：ShengBootMemoryDxe 在本板黑屏，任何构建都不许带；每轮构建前
+   复核基线补丁集。（§2）
+2. **刷机只用 boot_b 回路**，A 槽（Android + TWRP）永不动；回退 `set_active a`。（§2）
+3. **Apple 产物不入库**；**不改 mkadt 节点语义**绕检查（`/chosen` 必带 CHRP NVRAM
+   proxy、`/options` 必存在）。（AGENTS.md 硬规则 2/3）
+4. **内核补丁与 `ci/0019-unixnu-8796-ci.patch` 同一提交同步**；内核不在本地编，跑
+   Actions `kernel-8796`（macOS + Xcode 15，因 iig 世代；默认 pin UniXNU `40d21cc`，
+   一次 2–3 小时，上限 350 分钟）。prelink 步骤故意失败，由 `|| true` + `test -f` 接住。
+   （AGENTS.md 4、ci/README.md）
+5. **payload 走 FV 内 FAT12（B1）**，不走 boot.img ramdisk（LG ABL ram console /
+   secure watchdog）。（AGENTS.md 6）
+6. **每个镜像记录大小 + MD5 + 构建日志**（`logs/build-<tag>.log`），证据入
+   `evidence/<任务>/`；仓库只留可复现输入与结论。（AGENTS.md「记录方式」、patches/*.md 惯例）
+7. **监控 blob 改动走 `tools/m3u/`**：改 `.S` → `build.sh` → `gate.py` 全 PASS → 回填
+   补丁字节。（M3U2 新增）
+8. 其余原文条目：**待补**。
+
+## 8. 资产索引与镜像清单（重建）
+
+工作区根：`~/workspace/unixnu-flashlm/`（不在 git）。已知目录（据仓库内引用）：
+`builds/`（镜像）、`logs/`（`build-<tag>.log`）、`evidence/<任务>/`、
+`ci-artifacts/run1/`（CI 内核 run `41150570344`）、`docs/notes/`。
+
+镜像清单——只列仓库文档里出现过的；大小/MD5 取自所注文档，「—」= 仓库内无记录：
+
+| 镜像（`builds/`） | 大小 B | MD5 | 出处 |
+| --- | --- | --- | --- |
+| `lg-flash-baseline-uefi.img`（M1 基线） | 3,158,016 | `a75132e7a314b1c36bd71e0eb03a50a4` | §2 |
+| `lg-flash-unixnu-m2.img` | 3,194,880 | `87ef45b8fe067cb43818e7c6c94d589f` | NOTES.md |
+| `lg-flash-unixnu-m2e-kern83.img` | 3,194,880 | — | NOTES.md |
+| `lg-flash-unixnu-m2f-diag.img` | 3,194,880 | — | NOTES.md |
+| `lg-flash-unixnu-m2i-window.img`（**M2I，最后已知良好**） | 28,356,608 | `d61545de1972a443ac1ca5760bc91eb2` | §2 |
+| `lg-flash-unixnu-m3d-panicreroute.img` | — | `249a8c1d4fa5574f0c27a3a6395ef1a2` | kernel-panic-psci-reroute.md |
+| `lg-flash-unixnu-m3g-locore.img` | 28,356,608 | `be454dc549e031e22206cb156424f104` | kernel-locore-prog.md |
+| `lg-flash-unixnu-m3j-pscitest.img` | 28,356,608 | `95fb40a8082bb9d81f11ec2fd9c40cdd` | firmware-psci-survival-test.md |
+| `lg-flash-unixnu-m3l-earlycopy.img` | 28,356,608 | `e67e91eaa2939b1e99792ee29b742732` | m3l-earlycopy-fbmarks.md |
+| `lg-flash-unixnu-m3m-fbmarks.img` | 28,356,608 | `46876c0fb4c2f805a247c2d7cc61ce54` | m3m-flow.md |
+| `lg-flash-unixnu-m3p-cpuon.img` | 28,356,608 | — | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3p2-timer.img` | 28,356,608 | — | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3q-monitor.img` | 28,360,704 | — | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3q2-ablate.img` | 28,356,608 | `a50196e260fe9220ec3502e92ea868d0` | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3q3-fix.img` | 28,356,608 | `12509da7dadb654c7e170ac25c6a0dcd` | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3r-civac.img` | 28,356,608 | `350307b7b17351b0f79b287a7df278e4` | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3t-sig.img` | — | — | m3t-coherence-sig.md |
+| `lg-flash-unixnu-m3u-cohread.img` | 28,356,608 | `ff9fcf5d01954d17a4a80634f8f14e38` | monitor-core-m3p.md |
+
+待补：表中「—」项请在工作区用 `stat -c%s` / `md5sum builds/*.img` 实测回填；
+M3U2（v3.5.2）镜像构建后追加一行。

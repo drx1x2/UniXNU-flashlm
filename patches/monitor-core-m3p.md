@@ -868,3 +868,101 @@ Flash + slot B + reboot; in the freeze phase read row 3:
   for post-switch stubs).
 - idx2 must stay green (the gamma control) and idx0 must keep
   flashing, idx3 black, as before.
+
+# M3U2 — monitor blob v3.5.2: slot-page PXN fix + idx4 stage markers (DIAGNOSTIC ONLY)
+
+## Root cause of the M3U black row (host-side finding, not yet hardware-confirmed)
+
+The v3.5 slot-page L3 entry is `0x0040000089B00743`. Bits [7:6] of
+`0x743` are `01`, i.e. **AP[2:1] = 0b01 = read/write at EL1 _and_
+EL0** (the M3U text called it "AP RW", but the EL1-only RW encoding
+is `00`). In the EL1&0 stage-1 regime the ARM ARM treats any location
+that is writable at EL0 as **PXN at EL1 regardless of the descriptor's
+PXN bit** (DDI 0487, D8.4.1 "Stage 1 permissions"; the same rule is
+why Linux never maps EL0-writable pages as kernel text). The blob
+executes from that very page, so the first instruction fetch after
+`msr sctlr_el1` + `isb` (VA/PA `0x89B004F8`, the body's first
+instruction) takes a Permission-fault instruction abort. VBAR_EL1 on
+a freshly CPU_ON'd core is not set up, so the core parks silently,
+having painted nothing — exactly M3U's "row 3 all black", i.e. death
+cause (a) of HANDOVER §4.5, at the last step of the preamble.
+
+All other v3.5 constants re-check correct: MAIR `0x04FF`, TCR
+`0x0000000200803510`, the WB/RO block template, the args 1 GiB block,
+the Device FB blocks (`0x445`: AP `00`), the table indices (L1[2],
+L1[3], L2[77], L2[224..232], L3[256]).
+
+## Changes (blob)
+
+- **v3.5.2 = the fix:** slot-page entry `0x743` → `0x703`
+  (AP[2:1] = 00: EL1 RW, EL0 none; PXN = 0, UXN = 1, AF, ISH, attr0
+  unchanged). One immediate in the preamble.
+- **Stage markers (v3.5.1 and v3.5.2):** row-3 **idx4** (x 1040–1280,
+  y 2940–3000, PA `0x9D027640`) is painted by the existing `.Lfill`
+  routine at four points, all symmetric colors so an R/B swap in the
+  pixel format cannot change the reading:
+
+  | idx4 | painted after | MMU |
+  | --- | --- | --- |
+  | white `FFFFFFFF` | entry (S1) | off |
+  | magenta `FFFF00FF` | tables built + `dsb sy` (S2) | off |
+  | gray `FF808080` | MAIR/TCR/TTBR0 + `tlbi` + `isb` (S3) | off |
+  | green `FF00FF00` | SCTLR M\|C\|I + `isb` (S4), via the Device identity map | on |
+
+- The v3.4 body follows unchanged (relative branches only; same
+  idx0–idx3 semantics). v3.5.1 is v3.5.2 without the AP fix (control
+  build; expected to stop at gray). Blob size 1212 → 1308 B.
+
+## Changes (DarwinBoot, same patch file)
+
+- Allocation-failure path additionally paints idx4 **purple
+  `FF800080`**, so "no launch" is distinct from every blob marker.
+- Before CPU_ON, the four table pages are `dc civac`'d from the boot
+  core. The blob writes them with its MMU off (straight to DRAM) and
+  then walks them with cacheable (IRGN/ORGN WB) walks; a stale or dirty
+  line of a previous owner in the boot core's caches or the shared L3
+  could otherwise be snooped by the walker or written back over the
+  tables. The boot core never touches the pages again.
+
+## Verification gates (`tools/m3u/`, all host-side)
+
+- `build.sh`: `monitor35.S` (reconstructed from the shipped bytes)
+  reassembles **byte-identically** to the v3.5 blob; v3.5.1/v3.5.2 are
+  assembler-produced from it.
+- `gate.py` Gate A: the patch's blob array == `monitor352.bin`.
+- Gate B (Unicorn, MMU off, three table bases incl. one inside the
+  slot page's own 2 MiB): paint order white → magenta → gray, zero
+  stores outside the table pages and the FB, zero stores to the args
+  page.
+- Gate C (stage-1 walk of the tables the blob actually built, with the
+  EL0-writable ⇒ PXN rule): **v3.5 and v3.5.1 FAIL at the first fetch
+  after SCTLR.M (`implicit PXN: EL0-writable`); v3.5.2 PASSES** — every
+  body fetch executable, mailbox/SIG reads Normal-WB, row-3 FB
+  Device-RW.
+- Not covered: Unicorn 2.1 aborts even a minimal hand-built identity
+  map once SCTLR.M=1, so the MMU-on half is checked by Gate C only, and
+  CPU_ON still needs the real device (the QEMU rig cannot deliver it).
+
+## Hardware readout (M3U2, flash v3.5.2)
+
+Pre-registered reading of row 3 in the freeze phase:
+
+- **idx4 green + idx0 heartbeat** → the PXN fix is the whole story; the
+  cached reader runs. Then read **idx1** as in the M3U readout above
+  (a milestone color other than the old eviction values = the coherent
+  read works and pins the endpoint; still L4 yellow = the read side
+  fails, go to the write side, HANDOVER §5 甲 1).
+- **idx4 gray, idx0 black** → still dies at SCTLR/first fetch: next
+  suspects are the WB walk attributes (try IRGN0/ORGN0 = NC) and the
+  1 GiB args block (shrink to a 2 MiB block).
+- idx4 magenta → MAIR/TCR/TTBR0/TLBI step; white → table build;
+  **purple** → `AllocatePages` failed (no launch); idx4 untouched →
+  CPU_ON never reached the blob (compare row-11 `CPUON` text).
+
+
+## M3U2 真机结果（2026-11-01）
+
+v3.5.2 一刷：idx4 明绿（S4）、idx0 A 相心跳、idx2 绿、idx3 黑、一二排 10/10 ⇒
+隐式 PXN 根因确认，开缓存相干读侧成立。idx1 金色 (252,213,17)，G/R 0.845（同帧 L4
+柠檬黄 1.000）⇒ 精确终点 P4（`_pmap_bootstrap`）。死点区间：P4 之后、P5
+（`PE_init_printf` 返回）之前。M3Q3 的 P5 读数为淘汰假象。
