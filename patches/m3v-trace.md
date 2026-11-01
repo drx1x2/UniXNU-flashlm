@@ -153,3 +153,34 @@ initialize_screen 内分支多（按 op 走不同路径），中间点不全命�
 | 红 橙 停 | 死在 bzero 0x3C0FC000（写侧）⇒ 同上 |
 | 走到黄绿/绿之后 | panic-log 段无辜；终点在 initialize_screen，按最后命中格缩小 |
 | 白（0x2C）也亮 | initialize_screen 返回了 ⇒ 与读数 #1 矛盾，先复核 |
+
+## 真机读数 #2（2026-11-01，console 点集）
+
+第 1 格 (255,74,63) = 0x20 红，其余全暗灰；row-3 idx1 同为红（最新 ID 0x20）。
+⇒ `ml_io_map_wcomb(0x3C0FC000)` 返回了，**第一次读 0x3C0FC000 再没回来**（0x21 未命中）。
+嫌疑坐实：PE_create_console 用 bcm2837 遗留 panic-log 物理地址，在 SM8150 上读到非 DRAM
+地址，总线挂死。这就是 M3 一路追的「静默停住、不复位」的直接原因。
+
+## M3W：改址修复（`tools/m3v/fix_console_pa.py`）
+
+一字修改：`0x…793CBDC` `movk w0, #0x3c0f, lsl #16`（0x72A781E0）→ `movk w0, #0x9d1f, lsl #16`
+（0x72B3A3E0），PA 变 **0x9D1FC000**：
+
+- 属 "Display Reserved"（0x9C000000 + 18 MiB，PlatformMemoryMapLib.c）最后 16 KiB——非安全
+  DRAM，ABL 已为显示保留；
+- 在内核托管内存之外（physBase ≈ 0xC1000000），不会与页分配器冲突；
+- 在可见帧缓冲之后（0x9C000000 + 3120×5760 = 0x9D122000），bzero 不出现在屏幕上；
+- 全核唯一的 0x3c0f 立即数；与 `patch_trace.py` 改动的字不相交，可叠加。
+
+**建议下一刷**：现役 M3U 内核 → `fix_console_pa.py` → `patch_trace.py --set console`
+（模拟叠加共 326 字改动，反汇编核对通过）。
+
+| 读数 | 结论 |
+| --- | --- |
+| 条带过了红、橙继续亮 | 修复生效（读 0x9D1FC000 返回）；看最后命中格定位 initialize_screen 内的下一终点 |
+| 白（0x2C）也亮且 idx1 变 P5 粉/更后的 M3F 里程碑 | PE_create_console 与 PE_init_printf 都过了，终点后移到 P5 之后 |
+| 仍只有红 | 读 0x9D1FC000 也挂 ⇒ 不是「地址不是 DRAM」这么简单（属性/映射问题），回到反汇编 ml_io_map_wcomb |
+
+**源码层待办**（M4 线必须做，M3 可先用二进制修复）：上游 xnu `pexpert/arm` BCM2837 路径
+硬编码了这个 panic-log 地址；应在 ci/0019 的 xnu 补丁里改成按板配置（或在 flashlm 上关闭），
+不能把二进制修复带进 16K 单体内核线。

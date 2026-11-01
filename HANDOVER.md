@@ -233,6 +233,9 @@ blob 驻留槽页 `0x89B00400`；看门狗在 CPU_ON **之前**已武装，SMC �
 - **M3V 读数 #1（2026-11-01）**：p4p5 点集 0x20–0x2C 全命中 ⇒ 终点在 `PE_create_console` 内
   （含尾调 initialize_screen）。头号嫌疑：bcm2837 硬编码 PA 0x3C0FC000（SM8150 上非 DRAM）的
   映射与读取。下一刷：`patch_trace.py --set console`（M3V2，见 `patches/m3v-trace.md`）。
+- **M3V 读数 #2（2026-11-01）**：console 点集只中 0x20 ⇒ 第一次读 bcm2837 遗留 PA 0x3C0FC000 即总线挂死
+  （坐实）。修复 M3W：`tools/m3v/fix_console_pa.py` 一字把 PA 改为 0x9D1FC000（Display Reserved 尾部）。
+  源码层修复待做（ci/0019，M4 线必需）。
 - **乙-1（M3V 飞行记录仪）**：监控 v3.6 + 15 个 trace 桩（pmap_bootstrap 内 3、
   arm_vm_init 尾 4、arm_init 区间 8），一刷在菜单区画出执行顺序色带，直接读出终点
   落在哪两个调用之间。规格/判读：`patches/m3v-trace.md`；工具：`tools/m3v/`。
