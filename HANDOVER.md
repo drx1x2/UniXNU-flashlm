@@ -228,8 +228,72 @@ blob 驻留槽页 `0x89B00400`；看门狗在 CPU_ON **之前**已武装，SMC �
 - **版本三角**：见 §1。16K 线的 kernelcache、prelink、用户态三者同进同退；
   M3 的 4K 线结论只有语义可迁移。
 - **generatePlatformUUID**：ADT 数据已证合规、QEMU 之死是模拟器假象（§3）；
-  但此函数在 16K 线上仍是
+  但此函数在 16K 线上仍是**必经点**：16.7.16 出货内核是 `xnu-8796.142.1.703.8`，
+  与 141.3 源码不同修订，M4 首启前须对该版本重新核对它从 `/chosen` 读取的
+  `unique-chip-id` / `chip-id` 长度与类型（〔重建〕具体措辞已丢失，此句据 §3 补全）。
 
-> ⚠️ **本文件在提交 `32406ef` 时被截断**：§6 余下部分与 §7（构建纪律）、
-> §8（资产索引）、镜像清单约 7 KB 未进 git。请原维护者用本地完整版补回本节
-> 之后的内容（M3U2 分支未改动这部分）。
+> 🔧 **§6 余文、§7、§8 为 2026-11-01 重建版，不是原文。** 原文在最初写文件时即被
+> 截断（原维护者本地副本与提交 `32406ef` 逐字节相同），无任何完整副本。以下内容
+> 只取自仓库内现存资料（AGENTS.md、DEVIATIONS.md、ci/README.md、NOTES.md、
+> patches/*.md、本文 §1–§5），每条注明出处；原文中仓库内无据可查的内容标「待补」，
+> 不臆造。
+
+- **iOS 16 内核来源**：iOS 16 无开源源码，「源码内核 + 原版 kernelcache prelink」
+  对 16.7.16 不存在可用组合；唯一实机验证过的做法是 16 KiB 单体内核（内置
+  HFS/AMFI/UFS/pthread，不 prelink）。（DEVIATIONS.md）
+- **16K 单体内核 workflow 尚未建立**：需 `MACHINE_CONFIG=FLASHLM` + 板级件替换，
+  先做板级移植；路线见开发工作区 `docs/notes/16-ios16-route.md` §16.3。（ci/README.md）
+- **M3 结论迁移边界**：可迁 ADT 语义、地址/桩位、观测通道与 §4.4 相干律；不可迁
+  4K 内核二进制、prelink 假设。（§1）
+- 其余雷区条目：**待补**。
+
+## 7. 构建纪律（重建）
+
+1. **不带 Sheng**：ShengBootMemoryDxe 在本板黑屏，任何构建都不许带；每轮构建前
+   复核基线补丁集。（§2）
+2. **刷机只用 boot_b 回路**，A 槽（Android + TWRP）永不动；回退 `set_active a`。（§2）
+3. **Apple 产物不入库**；**不改 mkadt 节点语义**绕检查（`/chosen` 必带 CHRP NVRAM
+   proxy、`/options` 必存在）。（AGENTS.md 硬规则 2/3）
+4. **内核补丁与 `ci/0019-unixnu-8796-ci.patch` 同一提交同步**；内核不在本地编，跑
+   Actions `kernel-8796`（macOS + Xcode 15，因 iig 世代；默认 pin UniXNU `40d21cc`，
+   一次 2–3 小时，上限 350 分钟）。prelink 步骤故意失败，由 `|| true` + `test -f` 接住。
+   （AGENTS.md 4、ci/README.md）
+5. **payload 走 FV 内 FAT12（B1）**，不走 boot.img ramdisk（LG ABL ram console /
+   secure watchdog）。（AGENTS.md 6）
+6. **每个镜像记录大小 + MD5 + 构建日志**（`logs/build-<tag>.log`），证据入
+   `evidence/<任务>/`；仓库只留可复现输入与结论。（AGENTS.md「记录方式」、patches/*.md 惯例）
+7. **监控 blob 改动走 `tools/m3u/`**：改 `.S` → `build.sh` → `gate.py` 全 PASS → 回填
+   补丁字节。（M3U2 新增）
+8. 其余原文条目：**待补**。
+
+## 8. 资产索引与镜像清单（重建）
+
+工作区根：`~/workspace/unixnu-flashlm/`（不在 git）。已知目录（据仓库内引用）：
+`builds/`（镜像）、`logs/`（`build-<tag>.log`）、`evidence/<任务>/`、
+`ci-artifacts/run1/`（CI 内核 run `41150570344`）、`docs/notes/`。
+
+镜像清单——只列仓库文档里出现过的；大小/MD5 取自所注文档，「—」= 仓库内无记录：
+
+| 镜像（`builds/`） | 大小 B | MD5 | 出处 |
+| --- | --- | --- | --- |
+| `lg-flash-baseline-uefi.img`（M1 基线） | 3,158,016 | `a75132e7a314b1c36bd71e0eb03a50a4` | §2 |
+| `lg-flash-unixnu-m2.img` | 3,194,880 | `87ef45b8fe067cb43818e7c6c94d589f` | NOTES.md |
+| `lg-flash-unixnu-m2e-kern83.img` | 3,194,880 | — | NOTES.md |
+| `lg-flash-unixnu-m2f-diag.img` | 3,194,880 | — | NOTES.md |
+| `lg-flash-unixnu-m2i-window.img`（**M2I，最后已知良好**） | 28,356,608 | `d61545de1972a443ac1ca5760bc91eb2` | §2 |
+| `lg-flash-unixnu-m3d-panicreroute.img` | — | `249a8c1d4fa5574f0c27a3a6395ef1a2` | kernel-panic-psci-reroute.md |
+| `lg-flash-unixnu-m3g-locore.img` | 28,356,608 | `be454dc549e031e22206cb156424f104` | kernel-locore-prog.md |
+| `lg-flash-unixnu-m3j-pscitest.img` | 28,356,608 | `95fb40a8082bb9d81f11ec2fd9c40cdd` | firmware-psci-survival-test.md |
+| `lg-flash-unixnu-m3l-earlycopy.img` | 28,356,608 | `e67e91eaa2939b1e99792ee29b742732` | m3l-earlycopy-fbmarks.md |
+| `lg-flash-unixnu-m3m-fbmarks.img` | 28,356,608 | `46876c0fb4c2f805a247c2d7cc61ce54` | m3m-flow.md |
+| `lg-flash-unixnu-m3p-cpuon.img` | 28,356,608 | — | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3p2-timer.img` | 28,356,608 | — | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3q-monitor.img` | 28,360,704 | — | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3q2-ablate.img` | 28,356,608 | `a50196e260fe9220ec3502e92ea868d0` | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3q3-fix.img` | 28,356,608 | `12509da7dadb654c7e170ac25c6a0dcd` | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3r-civac.img` | 28,356,608 | `350307b7b17351b0f79b287a7df278e4` | monitor-core-m3p.md |
+| `lg-flash-unixnu-m3t-sig.img` | — | — | m3t-coherence-sig.md |
+| `lg-flash-unixnu-m3u-cohread.img` | 28,356,608 | `ff9fcf5d01954d17a4a80634f8f14e38` | monitor-core-m3p.md |
+
+待补：表中「—」项请在工作区用 `stat -c%s` / `md5sum builds/*.img` 实测回填；
+M3U2（v3.5.2）镜像构建后追加一行。
