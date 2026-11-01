@@ -1,3 +1,5 @@
+> **交接（2026-11-01）**：项目现状、死点定位结论与后续路线见 [HANDOVER.md](HANDOVER.md)，接手前先读它。
+
 # UniXNU device repository — LG V50 ThinQ (flashlm, SM8150)
 
 LG V50 ThinQ（LM-V500，`flashlm`，骁龙 855 / SM8150）的 UniXNU 设备仓库。

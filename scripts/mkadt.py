@@ -7,7 +7,7 @@ per-board profile).
 
 Usage:  mkadt.py OUT.adt [--device sweet|guacamole] [--dump] [--qemu] [--highmem]
 """
-import hashlib, os, struct, sys
+import hashlib, os, struct, sys, zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import adt      # noqa: E402
@@ -54,6 +54,34 @@ def node(name, props=(), children=()):
     n.props = [('name', 0, cstr(name))] + [(k, 0, v) for k, v in props]
     n.children = list(children)
     return n
+
+
+def empty_nvram_proxy():
+    """Encode the volatile CHRP bank consumed by IODTNVRAM.
+
+    Byte-for-byte the upstream UniXNU encoding
+    (scripts/unixnu/devicetree.py: empty_nvram_proxy). ArmDTPlatform's
+    hasNVRAMProxy() requires /chosen to carry nvram-bank-size (u32) and a
+    non-empty nvram-proxy-data; without them configure() refuses to boot.
+    """
+    def header(name, size):
+        raw = bytearray(struct.pack('<BBH12s', 0x70, 0, size // 16, name))
+        checksum = sum(raw)
+        while checksum > 255:
+            checksum = (checksum & 255) + (checksum >> 8)
+        raw[1] = checksum
+        return raw
+
+    image = bytearray(8192)
+    image[:16] = header(b'nvram', 32)
+    image[32:48] = header(b'common', 16 + 2048)
+    free_at = 32 + 16 + 2048
+    image[free_at:free_at + 16] = header(b'free', len(image) - free_at)
+    struct.pack_into('<I', image, 16, zlib.adler32(image[20:]))
+    return [('nvram-bank-size', u32(len(image))),
+            ('nvram-bank-count', u32(1)),
+            ('nvram-current-bank', u32(0)),
+            ('nvram-proxy-data', bytes(image))]
 
 
 def build(seed=None, qemu=False, highmem=False, device='sweet', dram_size=None, owned_memory_size=None):
@@ -112,6 +140,9 @@ def build(seed=None, qemu=False, highmem=False, device='sweet', dram_size=None, 
         ('effective-production-status-ap', u32(0)),
         ('certificate-security-mode', u32(1)),
         ('effective-security-mode-sep', u32(1)),
+        # CHRP NVRAM proxy: ArmDTPlatform::configure() rejects the tree
+        # when /chosen does not supply one (see empty_nvram_proxy()).
+        *empty_nvram_proxy(),
     ], [node('memory-map', [ph()]),
         # Local boot policy (kern_csr.c): SIP relaxed like `csrutil disable`
         # (lp-sip0: untrusted kexts, unrestricted FS, task_for_pid, kernel
@@ -213,6 +244,11 @@ def build(seed=None, qemu=False, highmem=False, device='sweet', dram_size=None, 
     product_props = d22ap_product()
     product = [node('product', [ph()] + product_props)] if product_props else []
 
+    # ArmDTPlatform::configure() also requires a /options node to exist
+    # (an empty one is enough). It deliberately gets no AAPL,phandle and is
+    # appended last, so every other node's phandle stays unchanged.
+    options = node('options')
+
     # Identity of the iPhone X whose userland runs here: compatible[0] is
     # hw.model/hw.target (D22AP), model is hw.machine/hw.product
     # (iPhone10,3). The board/SOC strings (devices.py) stay for the
@@ -226,7 +262,7 @@ def build(seed=None, qemu=False, highmem=False, device='sweet', dram_size=None, 
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([] if qemu else [ufs]) + [options])
 
 
 if __name__ == '__main__':

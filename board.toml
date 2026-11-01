@@ -116,7 +116,7 @@ kernel_args = [
 tool = "scripts/make-flashlm-adt.py"
 # flashlm 的 ECID 还没读出来（P0 的 getvar 里确认）；先 optional。
 unique_chip_id = "optional"
-owned_memory_size = "0xc0000000"
+owned_memory_size = "0x20000000"
 
 [bootimg.image]
 base = 0x0
