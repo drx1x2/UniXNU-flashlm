@@ -85,6 +85,18 @@ SETS['p10root'] = [   # M3Z10 (2026-11-02): sheng stage reset gone, ~29 s silent
     (0x26, 0xFFFFFFF007916B48, 0xD102C3FF, 'IOFindBSDRoot: entry (root-device wait follows)'),
     (0x27, 0xFFFFFFF00745ECC0, 0xD10783FF, 'vfs_mountroot: entry'),
 ]
+SETS['bsdinit'] = [  # M3Z12 (2026-11-02): with cpus=1 the p10root front reached 0x24 (bsd_init entry) but
+    # not 0x25 (IOKitBSDInit returned). Bisects bsd_init. REPLACES p10root (same cave budget, 8 x 24 words).
+    # The OSKextLoad points sit after conditional loads; a skipped load leaves a gap, judge by the LAST cell.
+    (0x20, 0xFFFFFFF0076965F8, 0xF9477F20, 'bsd_init: mac_policy_initbsd returned'),
+    (0x21, 0xFFFFFFF00769688C, 0x9407B1ED, 'bsd_init: bsd_bufferinit returned'),
+    (0x22, 0xFFFFFFF007696894, 0xB9002BFF, 'bsd_init: vfsinit returned'),
+    (0x23, 0xFFFFFFF0076968C4, 0xD0001C68, 'bsd_init: 1st OSKextLoadKextWithIdentifier returned'),
+    (0x24, 0xFFFFFFF007696958, 0xD0001C73, 'bsd_init: 2nd OSKextLoadKextWithIdentifier returned'),
+    (0x25, 0xFFFFFFF0076969C4, 0xD0001C68, 'bsd_init: 3rd OSKextLoadKextWithIdentifier returned'),
+    (0x26, 0xFFFFFFF007696A00, 0x94028840, 'bsd_init: dlil_init returned (mbinit..nwk_wq done)'),
+    (0x27, 0xFFFFFFF007696A64, 0x9409FC74, 'bsd_init: about to call IOKitBSDInit (net/memorystatus/kminit done)'),
+]
 STUB_WORDS = 24
 POINTS = SETS['p4p5']
 

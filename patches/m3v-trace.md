@@ -416,3 +416,14 @@ M3Z10 后 sheng 复位消失；约 29 s 后无记录复位 = M3K APSS 看门狗 
 配方：… → reset_halt → [cmdline_peek 可留可去] → `patch_trace.py --set p10root`，固件 v3.7。
 Unicorn：8 桩各自写 PROG 最新 ID、环 n=8 / `20…27`、回跳 entry+4 全对。
 可选：固件去掉 `M3KWatchdogArm()` 一行，让终点画面常驻，不用卡时间拍照。
+
+### M3Z11 真机（2026-11-02）
+- cpus=8 两轮：`20 21 22` 停、`20 21 23` 停（7 个副核只回 1 个 CPU_ON 或 0 个）⇒ 首个副核上线即全停，副核 CPU_ON wedge。
+- A/B `cpus=1`（ml_parse_cpu_topology 读 "cpus"）：`20 21 23 24` 停（无 22、无 25）⇒ 单核前沿进入 bsd_init，IOKitBSDInit 返回之前。
+
+## M3Z12：bsd_init 内二分（`patch_trace.py --set bsdinit`，替换 p10root，二者只能选一）
+保持 `cpus=1`。ID 0x20–0x27 依次：mac_policy_initbsd 返回 / bsd_bufferinit 返回 / vfsinit 返回 /
+第 1、2、3 个 OSKextLoadKextWithIdentifier 返回（有条件加载，跳过会留空，以**末格**为准）/
+dlil_init 返回（mbinit…nwk_wq 已过）/ 即将调用 IOKitBSDInit（网络、memorystatus、kminit 已过）。
+末格 0x27 ⇒ 卡在 IOKitBSDInit 内；0x22→0x23 之间 ⇒ 卡在 kext 加载（预链接 kext 缺失时的等待）。
+Unicorn：8 桩 ID、环、bl/adrp 重定位目标、回跳全对。副核 CPU_ON wedge 另案（startCPU / LowResetVector 入口）。
