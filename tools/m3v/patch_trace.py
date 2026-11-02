@@ -72,6 +72,19 @@ SETS['console'] = [   # M3V2 (2026-11-01): p4p5 readout ended at 0x2C, so the en
     (0x2B, 0xFFFFFFF0073B07BC, 0x52000260, 'initialize_screen: vc_progress_set returned (2nd site)'),
     (0x2C, 0xFFFFFFF0073B087C, 0xD65F03C0, 'initialize_screen: final ret reached'),
 ]
+SETS['p10root'] = [   # M3Z10 (2026-11-02): sheng stage reset gone, ~29 s silent then the M3K APSS
+    # watchdog bites (DarwinBoot arms it at handoff; the kernel never pets it, so ANY run that lasts
+    # 29 s ends this way). Bisects IOKit start -> root wait. 8 points (the start.s cave has ~197
+    # free words after crypto_reg/panic_halt/reset_halt/cmdline_peek; 8 x 24 = 192).
+    (0x20, 0xFFFFFFF00793C7DC, 0x97FD1A89, 'PE_init_iokit: InitIOKit returned'),
+    (0x21, 0xFFFFFFF00793C7E0, 0xA9467BFD, 'PE_init_iokit: ConfigureIOKit returned (platform expert started)'),
+    (0x22, 0xFFFFFFF00795FDD0, 0xF0000C08, 'ArmCpu::startCPU: PSCI CPU_ON returned (once per secondary)'),
+    (0x23, 0xFFFFFFF0079797D4, 0x97E9A921, 'kernel_bootstrap_thread: PE_init_iokit returned'),
+    (0x24, 0xFFFFFFF007696434, 0xD10483FF, 'bsd_init: entry'),
+    (0x25, 0xFFFFFFF007696A68, 0x97F6261A, 'bsd_init: IOKitBSDInit returned'),
+    (0x26, 0xFFFFFFF007916B48, 0xD102C3FF, 'IOFindBSDRoot: entry (root-device wait follows)'),
+    (0x27, 0xFFFFFFF00745ECC0, 0xD10783FF, 'vfs_mountroot: entry'),
+]
 STUB_WORDS = 24
 POINTS = SETS['p4p5']
 

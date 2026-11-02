@@ -390,3 +390,29 @@ M3Z10 `cmdline_peek.py`：把该 smc 改指 0x…73E0C00 的 57 字扫描器，�
 判读：找到 ⇒ 供值在命令行，看 FAR/长度确认是哪份 toml（board / unixnu.local / confirm_args），从源头删；
 没找到但仍到 0x63 ⇒ `PE_state.bootArgs` 指向的不是 DarwinBoot 那页或 CommandLine 被覆写，转查 bootArgs 指针。
 配方：… → panic_halt → reset_halt → cmdline_peek，固件 v3.7。Unicorn：四种命令行（带 `=1`、裸 token、无、空）字段全对。
+
+## M3Z11：P10 之后的色带二分（`patch_trace.py --set p10root`）
+
+M3Z10 后 sheng 复位消失；约 29 s 后无记录复位 = M3K APSS 看门狗 bite（DarwinBoot 交接前武装，
+`darwinboot-cpuon-monitor.patch` 里 `M3KWatchdogArm()` 仍在；内核从不喂狗）。**所以只要跑满 29 s
+就一定被咬，bite 本身不代表挂死**——可能是正常进展到无 UFS 驱动的根设备等待（`rd=ufsroot0`）。
+用色带看 29 s 内走到哪：v3.7 的色带是同轮实时画的，**在 bite 前（约 20–25 s）拍照**。
+
+| ID | 色 | VA | 点 |
+| --- | --- | --- | --- |
+| 0x20 | (调色板 0x20) | 0x…793C7DC | PE_init_iokit：InitIOKit 返回 |
+| 0x21 | | 0x…793C7E0 | PE_init_iokit：ConfigureIOKit 返回（平台专家已起） |
+| 0x22 | | 0x…795FDD0 | ArmCpu::startCPU：CPU_ON 返回（每个副核一次，可连出多格） |
+| 0x23 | | 0x…79797D4 | kernel_bootstrap_thread：PE_init_iokit 返回 |
+| 0x24 | 绿 | 0x…7696434 | bsd_init 入口 |
+| 0x25 | 春绿 | 0x…7696A68 | bsd_init：IOKitBSDInit 返回 |
+| 0x26 | 青 | 0x…7916B48 | IOFindBSDRoot 入口（其后是根设备等待） |
+| 0x27 | 天蓝 | 0x…745ECC0 | vfs_mountroot 入口 |
+
+判读：末格停在 0x26 ⇒ 内核在等根设备，M3 的内核侧目标基本达成（下一步是 UFS/ramdisk 根）；
+停在 0x20/0x21 之间 ⇒ IOKit 平台启动里挂（configure 之后的 start/匹配）；0x22 出现后不再前进 ⇒ 副核上线等待；
+0x23→0x24 之间 ⇒ kernel_bootstrap_thread 中段（vm_commpage / mac_policy / startup 子系统）。
+8 点 × 24 字 = 192 字：start.s 洞窗在 crypto_reg/panic_halt/reset_halt/cmdline_peek 之后约剩 197 字，刚好装下。
+配方：… → reset_halt → [cmdline_peek 可留可去] → `patch_trace.py --set p10root`，固件 v3.7。
+Unicorn：8 桩各自写 PROG 最新 ID、环 n=8 / `20…27`、回跳 entry+4 全对。
+可选：固件去掉 `M3KWatchdogArm()` 一行，让终点画面常驻，不用卡时间拍照。
