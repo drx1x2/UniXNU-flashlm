@@ -363,3 +363,30 @@ M3Z8 `tools/m3v/panic_halt.py`（源 panic_halt.S，23 字 @0x...73E0A00）：`_
 → 写 M3E 面包屑：CODE 0x50、ESR=x2(reason)、ELR=x6(panic 调用者)、FAR=x0(格式串 VA)，然后 wfe 死循环，不复位。
 Unicorn：经 _panic 进入，面包屑字段正确，停在循环。配方 … → crypto_reg → lr_rec → panic_halt，固件 v3.7。
 判读：CODE 50 ⇒ panic，按 FAR 查格式串、按 ELR 查调用者；如果仍然秒复位且没有记录 ⇒ 排除 panic，转向非 panic 复位源（PEHaltRestart / PSCI 直呼，或者记录器之外的异常）。
+
+## M3Z9 / M3Z10：复位截停命中 stage-1，查 CommandLine 供值
+
+M3Z9 `reset_halt.py`（d0789e3）真机读数 **CODE 0x63** = `ArmDTPlatform::configure` 第一处
+`sheng-platform-stage==1` SYSTEM_RESET（0x…795D96C）。前置门：/cpus /arm-io /defaults /options
+四节点齐 + `hasNVRAMProxy`（/chosen 的 CHRP NVRAM proxy）为真——它只是门，不供值。
+
+供值链（反汇编 + 上游 UniXNU 文档 docs/xnu/boot-arguments.md 互证）：`PE_parse_boot_argn` →
+`PE_boot_args()` = `PE_state.bootArgs + 0x6C` = `boot_args->CommandLine`；**不读 ADT /chosen**。
+DarwinBoot 把菜单条目 `args`（+ 选中的 `confirm_args`）原样拷进 CommandLine。本仓 board.toml
+`kernel_args` = `debug=0xc serial=3 cpus=8 keepsyms=1 rd=ufsroot0 wdt=-1`，不含 sheng；上游
+`./unixnu payload` 还会合并 `unixnu.local.toml [build] kernel_args` 与 `--kernel-arg`。
+注意：裸 token `sheng-platform-stage`（无 `=`）也解析为 1。之前「payload toml 无 args 字段」的结论有误：
+make-flashlm-payload.py 会写 `args = "<kernel_args>"`。
+
+M3Z10 `cmdline_peek.py`：把该 smc 改指 0x…73E0C00 的 57 字扫描器，尾跳 reset_halt 记录器：
+
+| v3.7 行 | 含义 |
+| --- | --- |
+| CODE | 0x6A |
+| ESR | 高 16 位 = strlen(CommandLine)，低 16 位 = `sheng-platform-stage` 偏移（0xFFFF = 没找到） |
+| ELR | 名字后 8 字节，小端 ASCII（`=1 c…` 读作 `…63 20 31 3d`） |
+| FAR | CommandLine 头 8 字节，小端 ASCII（正常应为 `debug=0x` = `0x7830 3d67 7562 6564`） |
+
+判读：找到 ⇒ 供值在命令行，看 FAR/长度确认是哪份 toml（board / unixnu.local / confirm_args），从源头删；
+没找到但仍到 0x63 ⇒ `PE_state.bootArgs` 指向的不是 DarwinBoot 那页或 CommandLine 被覆写，转查 bootArgs 指针。
+配方：… → panic_halt → reset_halt → cmdline_peek，固件 v3.7。Unicorn：四种命令行（带 `=1`、裸 token、无、空）字段全对。
