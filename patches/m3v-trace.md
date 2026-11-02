@@ -427,3 +427,18 @@ Unicorn：8 桩各自写 PROG 最新 ID、环 n=8 / `20…27`、回跳 entry+4 �
 dlil_init 返回（mbinit…nwk_wq 已过）/ 即将调用 IOKitBSDInit（网络、memorystatus、kminit 已过）。
 末格 0x27 ⇒ 卡在 IOKitBSDInit 内；0x22→0x23 之间 ⇒ 卡在 kext 加载（预链接 kext 缺失时的等待）。
 Unicorn：8 桩 ID、环、bl/adrp 重定位目标、回跳全对。副核 CPU_ON wedge 另案（startCPU / LowResetVector 入口）。
+
+### M3Z12 真机：bsdinit 全暗；bsd_simul_execs 断言嫌疑复核（2026-11-02）
+全暗 ⇒ 死在 bsd_init 入口与 mac_policy_initbsd 返回之间（构建与桩已由交付字节 Unicorn 复执排除）。
+朋友嫌疑：0x…76965A4 `cbz` 断言 `bsd_simul_execs != 0`。复核（未剥离反汇编）：`_bsd_exec_setup` 虽无 `bl`
+调用者，但 `_bsd_scale_setup` 在 0x…743CD3C **尾调用**（`b`）它，`_scale_setup` 又在 0x…72A9230 尾调用
+`_bsd_scale_setup`，`_scale_setup` 由 startup 表（指针在 0x…7C4BE20）登记，在 bsd_init 之前的
+kernel_startup_initialize_upto 中运行。写入值来自表 0x…7022DA0 = {33,33,65,65,129,129,257,257}，大于 7 时为 513，
+**不可能为 0**。Unicorn 需种子是因为从 bsd_init 中途起跑、没跑 startup。断言嫌疑因此偏弱，但不排除 startup 未登记/未跑。
+
+## M3Z13：bsd_init 头段二分（`--set bsdhead`，替换前两组，保持 cpus=1）
+0x20 platform_stall_panic_or_spin 返回 / 0x21 throttle_init 返回 / 0x22 第 1 个 printf 返回（控制台路径）/
+0x23 kauth_init 返回 / 0x24 proc_ro_alloc 返回 / 0x25 fdt_init 返回（锁初始化已过）/
+0x26 第 2 个 printf 返回（zalloc_permanent 已过）/ **0x27 = 断言着陆点 0x…7696E40**（bsd_simul_execs==0，下一步 panic）。
+同一刀既二分又直接检验断言：出现 0x27 ⇒ 断言坐实；0x26 后无 0x27 ⇒ 断言排除，死在 current_uthread/mac_policy_initbsd。
+Unicorn：8 桩 ID、环 `20…27`、bl/adrp 重定位、回跳全对。

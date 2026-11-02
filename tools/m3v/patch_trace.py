@@ -97,6 +97,18 @@ SETS['bsdinit'] = [  # M3Z12 (2026-11-02): with cpus=1 the p10root front reached
     (0x26, 0xFFFFFFF007696A00, 0x94028840, 'bsd_init: dlil_init returned (mbinit..nwk_wq done)'),
     (0x27, 0xFFFFFFF007696A64, 0x9409FC74, 'bsd_init: about to call IOKitBSDInit (net/memorystatus/kminit done)'),
 ]
+SETS['bsdhead'] = [  # M3Z13 (2026-11-02): bsdinit set stayed all dark => death between bsd_init entry and
+    # mac_policy_initbsd return. Bisects that head; 0x27 sits on the bsd_simul_execs==0 assert landing
+    # (cbz at 0x...76965A4). REPLACES p10root/bsdinit. Keep cpus=1.
+    (0x20, 0xFFFFFFF007696484, 0x97F7F332, 'bsd_init: platform_stall_panic_or_spin returned'),
+    (0x21, 0xFFFFFFF007696488, 0x90FFD140, 'bsd_init: throttle_init returned'),
+    (0x22, 0xFFFFFFF007696494, 0x940025B4, 'bsd_init: 1st printf returned (console path)'),
+    (0x23, 0xFFFFFFF007696498, 0x90FFD658, 'bsd_init: kauth_init returned'),
+    (0x24, 0xFFFFFFF0076964FC, 0xF9477F34, 'bsd_init: proc_ro_alloc returned'),
+    (0x25, 0xFFFFFFF00769658C, 0xD0001C68, 'bsd_init: fdt_init returned (lck inits done)'),
+    (0x26, 0xFFFFFFF0076965EC, 0x9400F11A, 'bsd_init: 2nd printf returned (zalloc_permanent done)'),
+    (0x27, 0xFFFFFFF007696E40, 0x940CA355, 'bsd_init: ASSERT landing bsd_simul_execs==0 (would panic next)'),
+]
 STUB_WORDS = 24
 POINTS = SETS['p4p5']
 
