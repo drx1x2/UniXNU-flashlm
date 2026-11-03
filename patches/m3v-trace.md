@@ -442,3 +442,36 @@ kernel_startup_initialize_upto 中运行。写入值来自表 0x…7022DA0 = {33
 0x26 第 2 个 printf 返回（zalloc_permanent 已过）/ **0x27 = 断言着陆点 0x…7696E40**（bsd_simul_execs==0，下一步 panic）。
 同一刀既二分又直接检验断言：出现 0x27 ⇒ 断言坐实；0x26 后无 0x27 ⇒ 断言排除，死在 current_uthread/mac_policy_initbsd。
 Unicorn：8 桩 ID、环 `20…27`、bl/adrp 重定位、回跳全对。
+
+## M3Z14：副核 CPU_ON 卡死——对照 ios-raphael 的修复（`smp_clean.py` + `--set smp1`，一次刷机）
+
+对照对象：github.com/marnov999/raphael-ios-gpu（K20 Pro，SM8150，XNU 自编，已实测 8/8 核：
+`PSCI CPU_ON rc=0, SGI1 OK`）。逐项对照：
+
+| 项 | raphael | 本仓（预编 bcm2837 诊断核） | 结论 |
+| --- | --- | --- | --- |
+| ADT cpu reg | MPIDR Aff1:Aff0（0x000…0x700） | 同（devices.py `cpu_regs`） | 一致 |
+| reset_vector MPIDR 掩码 | 改成 `and #0xFFFF`（原 `#0xFF` 会把所有核认成 cpu0） | 本核已是 `#0xffff`（0x…73E0420） | 不是原因 |
+| kryo 名字匹配 | SweetCPU 的 IONameMatch 由 kryo470 改为 kryo485 | ArmCpu 已 start、已走到 CPU_ON | 不是原因（ArmCpu 已匹配） |
+| CPU_ON 入口 | 自带入口桩（DAIF、EL2→EL1 降级）→ LowResetVectorBase | 直接用 LowResetVectorBase 的 PA | EL1 入口时等价 |
+| **MMU 关时读的数据清到 PoC** | 强制清 CpuDataEntries、cpu_data、ResetHandlerData、BootArgs、**sysreg_restore**、**cpu_ttep**、**bootstrap_pagetables** | ArmCpu 只清 LowResetVector+64K、ResetHandlerData+4K、0x…71647F8+4K；cpu_start 的 flush_dcache 清 cpu_data/CpuDataEntries。**sysreg_restore（0x…71647A8 所在行 0x…7164780）、cpu_ttep（0x…71646B8）、bootstrap_pagetables 没清** | **头号嫌疑** |
+| 开 MMU 前屏障 | tlbi/ic iallu 后加 `dsb sy; isb` | common_start：`ic iallu` 后直到 SCTLR 之前没有 dsb | 次嫌疑，一并修 |
+| CPU7 | 8 核全给内核 | CPU7（0x700）被 v3.x 监控占用 | 测试用 cpus=7 |
+
+机理：副核以 MMU 和缓存关闭的状态读 TCR（sysreg_restore）和 TTBR1（cpu_ttep）。这两个值是开缓存后写的，可能还脏在 L3/LLCC 里，
+DRAM 里是旧值，副核于是在垃圾页表上开 MMU；页表遍历打到受保护或无后备的 PA，会把 NoC 挂死，所有核一起停。
+这和 0x3C0FC000 那次属于同一类。读数吻合：首个 CPU_ON 返回 0 次或 1 次后全停，cpus=1 时不停。
+
+`smp_clean.py`（原位改 5 个字，不占洞窗；原字不符就拒绝）：
+1. startCPU 第 3 段清缓存：0x…71647F8+4K 改成 0x…7164000..0x…7177000，共 1216 行（全在 __DATA_CONST,__const）。
+2. common_start：0x…73E2330 的空操作 `add x0,x0,#0` 改成 `dsb sy`；0x…73E2340/44 的两条 `movk #0`
+   改成 `isb; movz x0,#0`，SCTLR 值仍是 0x3454593D。
+
+`--set smp1`（替换其他组）：0x20 CPU_ON 返回（cpus=7 时应有 6 格）/ 0x21 PE_init_iokit 返回 / 0x22 bsd_init 入口 /
+0x23 platform_stall 返回 / 0x24 printf#1 返回 / 0x25 kauth_init 返回 / 0x26 fdt_init 返回 / 0x27 mac_policy_initbsd 返回。
+一次刷机同时回答两件事：0x20 的格数 = SMP 修复是否生效；0x22 之后的末格 = bsd_init 头段死点。
+
+配方（固件 v3.7，**不加 `--stop-cpuon`**，kernel_args `cpus=7`）：
+… → panic_halt → reset_halt → [cmdline_peek] → `smp_clean.py` → `patch_trace.py --set smp1`。
+Unicorn：清缓存段 1216 行，覆盖 ttep/TCR/const_boot_args/BootArgs/bootstrap/ResetHandlerData；SCTLR 值不变；8 桩全对。
+判读：6 格 0x20 且后面走到 0x21 ⇒ SMP 修复成立；仍只有 0–1 格 ⇒ 缓存清理不是全部原因，下一嫌疑是副核的入口 EL / reset_vector 未匹配（旋在 0x…73E0484）。

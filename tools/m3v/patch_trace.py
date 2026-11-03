@@ -109,6 +109,17 @@ SETS['bsdhead'] = [  # M3Z13 (2026-11-02): bsdinit set stayed all dark => death 
     (0x26, 0xFFFFFFF0076965EC, 0x9400F11A, 'bsd_init: 2nd printf returned (zalloc_permanent done)'),
     (0x27, 0xFFFFFFF007696E40, 0x940CA355, 'bsd_init: ASSERT landing bsd_simul_execs==0 (would panic next)'),
 ]
+SETS['smp1'] = [  # M3Z14 (2026-11-03): one image answers both open questions -- smp_clean fixes the
+    # CPU_ON wedge (boot with cpus=7) AND the bsd_init head is bisected. REPLACES the other sets.
+    (0x20, 0xFFFFFFF00795FDD0, 0xF0000C08, 'ArmCpu::startCPU: PSCI CPU_ON returned (expect 6 cells with cpus=7)'),
+    (0x21, 0xFFFFFFF0079797D4, 0x97E9A921, 'kernel_bootstrap_thread: PE_init_iokit returned'),
+    (0x22, 0xFFFFFFF007696434, 0xD10483FF, 'bsd_init: entry'),
+    (0x23, 0xFFFFFFF007696484, 0x97F7F332, 'bsd_init: platform_stall_panic_or_spin returned'),
+    (0x24, 0xFFFFFFF007696494, 0x940025B4, 'bsd_init: 1st printf returned (console path)'),
+    (0x25, 0xFFFFFFF007696498, 0x90FFD658, 'bsd_init: kauth_init returned'),
+    (0x26, 0xFFFFFFF00769658C, 0xD0001C68, 'bsd_init: fdt_init returned'),
+    (0x27, 0xFFFFFFF0076965F8, 0xF9477F20, 'bsd_init: mac_policy_initbsd returned (head done)'),
+]
 STUB_WORDS = 24
 POINTS = SETS['p4p5']
 
